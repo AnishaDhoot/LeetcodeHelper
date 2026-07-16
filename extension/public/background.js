@@ -1,6 +1,6 @@
 // Chrome Extension Service Worker (background.js)
 // Handles API calls to the local FastAPI backend to bypass CORS and extension constraints,
-// and fetches the user's LeetCode solved-problem history via the GraphQL API.
+// and fetches the user's LeetCode solved-problem history via scripting injection.
 
 const BACKEND_URL = "http://localhost:8000";
 
@@ -16,119 +16,110 @@ async function backendFetch(path, { method = "GET", body } = {}) {
   return res.json();
 }
 
-// Fetch the logged-in user's solved problems from LeetCode's GraphQL endpoint.
-// Runs in the service worker, so session cookies for leetcode.com are sent automatically.
-async function fetchSolvedProblems() {
-  // Common headers required by LeetCode's GraphQL endpoint
-  const LC_HEADERS = {
-    "Content-Type": "application/json",
-    "Referer": "https://leetcode.com"
-  };
+// ---------------------------------------------------------------------------
+// LeetCode history fetch via chrome.scripting.executeScript (world: "MAIN")
+//
+// WHY world:"MAIN": The injected code runs inside the LeetCode page's own
+// JavaScript context, so every fetch is same-origin (leetcode.com → leetcode.com)
+// with session cookies included automatically. No CORS issues.
+//
+// HOW we get ALL problems: LeetCode's /api/problems/all/ REST endpoint returns
+// every problem the authenticated user has attempted, including solved status.
+// This has no page-size limit — one request gives the full history.
+// ---------------------------------------------------------------------------
 
-  // 1. Resolve the signed-in username from the global badge / progress query.
-  const statusQuery = {
-    query: `query globalData { userStatus { username isSignedIn } }`,
-    variables: {}
-  };
-  const statusRes = await fetch("https://leetcode.com/graphql/", {
-    method: "POST",
-    headers: LC_HEADERS,
-    credentials: "include",
-    body: JSON.stringify(statusQuery)
-  });
-  if (!statusRes.ok) throw new Error(`LeetCode status HTTP ${statusRes.status}`);
-  const statusData = await statusRes.json();
-  const username = statusData?.data?.userStatus?.username;
-  const isSignedIn = statusData?.data?.userStatus?.isSignedIn;
-  if (!isSignedIn || !username) {
-    throw new Error("Not signed in to LeetCode. Please log in and try again.");
+async function fetchSolvedProblemsViaTab() {
+  // Find an open leetcode.com tab to piggy-back on.
+  const tabs = await chrome.tabs.query({ url: "https://leetcode.com/*" });
+  if (!tabs || tabs.length === 0) {
+    throw new Error(
+      "No LeetCode tab found. Please open leetcode.com in a tab and try again."
+    );
   }
+  const tabId = tabs[0].id;
 
-  // 2. Fetch accepted submissions using recentAcSubmissionList (works on current LeetCode API).
-  //    The API returns up to 20 per call, so we call multiple times with increasing limits
-  //    to collect as many unique solved problems as possible (cap at 200 to be safe).
-  const BATCH_SIZE = 20;
-  const MAX_PROBLEMS = 200;
-  const seenSlugs = new Set();
-  const rawProblems = []; // {titleSlug, title}
-
-  for (let limit = BATCH_SIZE; limit <= MAX_PROBLEMS; limit += BATCH_SIZE) {
-    const acQuery = {
-      query: `query recentAcSubmissions($username: String!, $limit: Int!) {
-        recentAcSubmissionList(username: $username, limit: $limit) {
-          id
-          title
-          titleSlug
-          timestamp
-        }
-      }`,
-      variables: { username, limit }
-    };
-    const acRes = await fetch("https://leetcode.com/graphql/", {
-      method: "POST",
-      headers: LC_HEADERS,
-      credentials: "include",
-      body: JSON.stringify(acQuery)
-    });
-    if (!acRes.ok) throw new Error(`LeetCode AC submissions HTTP ${acRes.status}`);
-    const acData = await acRes.json();
-    const submissions = acData?.data?.recentAcSubmissionList || [];
-
-    // Deduplicate by titleSlug
-    let newFound = 0;
-    for (const s of submissions) {
-      if (!seenSlugs.has(s.titleSlug)) {
-        seenSlugs.add(s.titleSlug);
-        rawProblems.push({ titleSlug: s.titleSlug, title: s.title });
-        newFound++;
-      }
-    }
-
-    // If the API returned fewer items than requested, we've got everything
-    if (submissions.length < limit || newFound === 0) break;
-  }
-
-  // 3. Fetch topic tags + difficulty for each unique problem via questionData query.
-  //    LeetCode's public questionData query works per-slug and doesn't require auth.
-  const problems = [];
-  for (const { titleSlug, title } of rawProblems) {
-    try {
-      const qQuery = {
-        query: `query questionData($titleSlug: String!) {
-          question(titleSlug: $titleSlug) {
-            difficulty
-            topicTags { name }
-          }
-        }`,
-        variables: { titleSlug }
-      };
-      const qRes = await fetch("https://leetcode.com/graphql/", {
-        method: "POST",
-        headers: LC_HEADERS,
-        credentials: "include",
-        body: JSON.stringify(qQuery)
+  // Inject script into the LeetCode page (MAIN world = same-origin fetch).
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: async () => {
+      // ── Step 1: Get ALL solved problems in ONE request ──────────────────
+      // /api/problems/all/ returns every LeetCode problem with the user's
+      // solved status (status === "ac"). No pagination, no artificial limit.
+      const apiRes = await fetch("https://leetcode.com/api/problems/all/", {
+        credentials: "include"
       });
-      let difficulty = "Medium";
-      let topics = ["Arrays & Hashing"];
-      if (qRes.ok) {
-        const qData = await qRes.json();
-        const q = qData?.data?.question;
-        if (q) {
-          difficulty = q.difficulty || difficulty;
-          const tags = (q.topicTags || []).map((t) => t.name);
-          if (tags.length > 0) topics = tags;
-        }
-      }
-      problems.push({ problem_id: titleSlug, title, difficulty, topics });
-    } catch (_) {
-      // If a single problem detail fetch fails, push with defaults rather than aborting.
-      problems.push({ problem_id: titleSlug, title, difficulty: "Medium", topics: ["Arrays & Hashing"] });
-    }
-  }
+      if (!apiRes.ok) throw new Error(`Problems API HTTP ${apiRes.status}`);
+      const apiData = await apiRes.json();
 
-  return problems;
+      if (!apiData.user_name) {
+        throw new Error(
+          "Not signed in to LeetCode. Please log in and visit leetcode.com first."
+        );
+      }
+
+      const diffMap = { 1: "Easy", 2: "Medium", 3: "Hard" };
+      const solved = (apiData.stat_status_pairs || [])
+        .filter(p => p.status === "ac" && !p.stat.question__hide)
+        .map(p => ({
+          slug: p.stat.question__title_slug,
+          title: p.stat.question__title || p.stat.question__title_slug,
+          difficulty: diffMap[p.difficulty?.level] || "Medium"
+        }));
+
+      if (solved.length === 0) return { ok: true, problems: [] };
+
+      // ── Step 2: Fetch topic tags concurrently (20 at a time) ────────────
+      // We run batches of 20 concurrent GraphQL requests so topic data is
+      // collected quickly without hammering LeetCode's rate limits.
+      const BATCH = 20;
+      const problems = [];
+
+      for (let i = 0; i < solved.length; i += BATCH) {
+        const chunk = solved.slice(i, i + BATCH);
+        const settled = await Promise.allSettled(
+          chunk.map(async ({ slug, title, difficulty }) => {
+            try {
+              const r = await fetch("https://leetcode.com/graphql/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  query: `query q($s: String!) { question(titleSlug: $s) { topicTags { name } } }`,
+                  variables: { s: slug }
+                })
+              });
+              const d = r.ok ? await r.json() : null;
+              const tags = (d?.data?.question?.topicTags || []).map(t => t.name);
+              return {
+                problem_id: slug,
+                title,
+                difficulty,
+                topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
+              };
+            } catch {
+              return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"] };
+            }
+          })
+        );
+        settled.forEach(r => r.status === "fulfilled" && problems.push(r.value));
+      }
+
+      return { ok: true, problems };
+    }
+  });
+
+  const result = results?.[0]?.result;
+  if (!result?.ok) {
+    throw new Error(
+      "Script returned no result. Please refresh the LeetCode tab and try again."
+    );
+  }
+  return result.problems;
 }
 
+// ---------------------------------------------------------------------------
+// Message router
+// ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log("[DSA Tutor Background] Received message:", request);
 
@@ -137,7 +128,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     backendFetch("/submissions/analyze", { method: "POST", body: request.payload })
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true; // Keep message channel open for async response
+    return true;
   }
 
   if (request.action === "get_mastery") {
@@ -205,9 +196,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // --- LeetCode history fetch (uses logged-in session cookies) ---
+  // --- LeetCode history fetch (injects into LeetCode tab for same-origin access) ---
   if (request.action === "fetch_leetcode_history") {
-    fetchSolvedProblems()
+    fetchSolvedProblemsViaTab()
       .then((problems) => sendResponse({ success: true, data: { problems } }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;

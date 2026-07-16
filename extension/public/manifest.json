@@ -3,7 +3,7 @@
   "name": "DSA Tutor Agent",
   "version": "0.1",
   "description": "Autonomous DSA Tutor Agent overlay for LeetCode. Conceptual failure diagnostics and adaptive problem recommendation.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "cookies", "tabs"],
   "host_permissions": [
     "https://leetcode.com/*",
     "http://localhost:8000/*"

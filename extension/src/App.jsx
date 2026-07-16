@@ -98,9 +98,8 @@ export default function App() {
     }
   };
 
-  // Sync LeetCode solved-problem history: fetch via GraphQL, then POST to backend.
   const runHistorySync = async () => {
-    setSyncStatus({ phase: 'fetching', message: 'Fetching your LeetCode solved problems...' });
+    setSyncStatus({ phase: 'fetching', message: 'Fetching all your solved problems from LeetCode… This may take a moment.' });
     chrome.runtime.sendMessage({ action: 'fetch_leetcode_history' }, (fetchRes) => {
       if (!fetchRes || !fetchRes.success) {
         setSyncStatus({ phase: 'error', message: fetchRes?.error || 'Failed to fetch LeetCode history.' });
@@ -111,7 +110,7 @@ export default function App() {
         setSyncStatus({ phase: 'done', message: 'No solved problems found. Solve a few on LeetCode first!', counts: { synced: 0, topics: 0 } });
         return;
       }
-      setSyncStatus({ phase: 'syncing', message: `Importing ${problems.length} problem(s) into your tutor...` });
+      setSyncStatus({ phase: 'syncing', message: `Importing ${problems.length} solved problem(s) into your tutor…` });
       chrome.runtime.sendMessage({ action: 'sync_solved', payload: { problems } }, (syncRes) => {
         if (!syncRes || !syncRes.success) {
           setSyncStatus({ phase: 'error', message: syncRes?.error || 'Backend sync failed.' });
@@ -128,6 +127,7 @@ export default function App() {
       });
     });
   };
+
 
   const checkBackendHealth = () => {
     chrome.runtime.sendMessage({ action: 'check_health' }, (response) => {
@@ -526,7 +526,7 @@ export default function App() {
           <div>
             <h4 className="section-heading">LeetCode History Sync</h4>
             <p className="coach-intro">
-              Import your LeetCode solved problems so the tutor knows what you've already covered. This registers the problems and adds their topics to your mastery tracker without inflating your scores.
+              Import <strong>all</strong> your LeetCode solved problems so the tutor knows what you've already covered. This registers every solved problem and adds their topics to your mastery tracker without inflating your scores.
             </p>
 
             <button
@@ -536,7 +536,7 @@ export default function App() {
             >
               {syncStatus && ['fetching', 'syncing'].includes(syncStatus.phase)
                 ? 'Syncing…'
-                : 'Sync LeetCode History'}
+                : 'Sync All LeetCode History'}
             </button>
 
             {syncStatus && (
