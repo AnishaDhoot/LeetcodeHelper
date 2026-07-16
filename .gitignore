@@ -1,0 +1,23 @@
+# Virtual Environment
+.venv/
+__pycache__/
+*.pyc
+
+# Node / Frontend Build Outputs
+node_modules/
+extension/dist/
+extension/node_modules/
+.oxlintrc.json
+
+# Databases
+*.db
+*.db-journal
+*.db-wal
+
+# Environment Variables
+.env
+backend/.env
+
+# IDE / Logs
+.vscode/
+*.log
