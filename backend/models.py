@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ class Problem(Base):
     url = Column(String, nullable=False)
     difficulty = Column(String, nullable=False) # Easy, Medium, Hard
     topics = Column(String, nullable=False) # Comma-separated list of topics, e.g. "Arrays,Two Pointers"
+    is_solved = Column(Boolean, default=False, nullable=False) # True once synced from LeetCode history
 
     attempts = relationship("Attempt", back_populates="problem")
 
@@ -44,6 +45,14 @@ class TopicMastery(Base):
     success_rate = Column(Float, default=0.0, nullable=False)
     last_attempted = Column(DateTime, nullable=True)
     next_due_date = Column(DateTime, nullable=True)
+
+
+class UserConfig(Base):
+    """Simple key/value store for user preferences (e.g. focus topic)."""
+    __tablename__ = "user_config"
+
+    key = Column(String, primary_key=True, index=True)
+    value = Column(String, nullable=True)
 
 
 # ==========================================
@@ -121,6 +130,27 @@ class SolvedProblemSyncSchema(BaseModel):
 
 class SyncSolvedRequest(BaseModel):
     problems: List[SolvedProblemSyncSchema]
+
+
+class TopicStatItem(BaseModel):
+    topic: str
+    solved_count: int
+    mastery_score: float
+
+
+class TopicAnalysisResponse(BaseModel):
+    total_solved: int
+    difficulty_breakdown: dict
+    top_topics: List[TopicStatItem]
+    weak_topics: List[TopicStatItem]
+
+
+class FocusResponse(BaseModel):
+    focus_topic: Optional[str] = None
+
+
+class SetFocusRequest(BaseModel):
+    topic: Optional[str] = None  # None / empty clears the focus
 
 
 class CheckApproachRequest(BaseModel):

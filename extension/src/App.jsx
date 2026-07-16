@@ -30,6 +30,12 @@ export default function App() {
   // Backend health state
   const [backendOnline, setBackendOnline] = useState(null); // null=unknown, true/false
 
+  // Focus topic state
+  const [focusTopic, setFocusTopic] = useState(null);
+
+  // Topic analysis state (loaded after sync or on mount)
+  const [analysisData, setAnalysisData] = useState(null);
+
   // Helper: gather current code/lang/constraints + identity, throw on empty code.
   const gatherContext = async (requireCode = true) => {
     const identity = window.dsaTutor?.getIdentity
@@ -122,8 +128,11 @@ export default function App() {
           message: syncRes.data.message,
           counts: { synced, topics, new_topics, fetched: problems.length }
         });
-        // Refresh mastery (new topic rows may now exist).
+        // Refresh mastery, focus, analysis, and recommendations.
         fetchMastery();
+        fetchFocus();
+        fetchAnalysis();
+        fetchRecommendation();
       });
     });
   };
@@ -135,11 +144,38 @@ export default function App() {
     });
   };
 
+  const fetchFocus = () => {
+    chrome.runtime.sendMessage({ action: 'get_focus' }, (response) => {
+      if (response && response.success) {
+        setFocusTopic(response.data?.focus_topic || null);
+      }
+    });
+  };
+
+  const setFocus = (topic) => {
+    chrome.runtime.sendMessage({ action: 'set_focus', payload: { topic: topic || '' } }, (response) => {
+      if (response && response.success) {
+        setFocusTopic(response.data?.focus_topic || null);
+        fetchRecommendation(); // Refresh to pick up focus-based rec
+      }
+    });
+  };
+
+  const fetchAnalysis = () => {
+    chrome.runtime.sendMessage({ action: 'get_analysis' }, (response) => {
+      if (response && response.success) {
+        setAnalysisData(response.data);
+      }
+    });
+  };
+
   // Fetch data on mount
   useEffect(() => {
     fetchMastery();
     fetchRecommendation();
     checkBackendHealth();
+    fetchFocus();
+    fetchAnalysis();
 
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
@@ -274,6 +310,19 @@ export default function App() {
         {/* TAB 1: MASTERY OVERVIEW */}
         {activeTab === 'mastery' && (
           <div>
+            {/* Focus banner */}
+            {focusTopic && (
+              <div className="focus-banner">
+                <div className="focus-banner-text">
+                  <span className="focus-icon">🎯</span>
+                  <span>Focus Topic: <strong>{focusTopic}</strong></span>
+                </div>
+                <button className="focus-change-btn" onClick={() => setFocus('')}>
+                  Clear Focus
+                </button>
+              </div>
+            )}
+
             <h4 className="section-heading">Per-Topic Mastery Levels</h4>
             {masteryData.length === 0 ? (
               <div className="empty-state">
@@ -281,7 +330,10 @@ export default function App() {
               </div>
             ) : (
               masteryData.map((data) => (
-                <div key={data.topic} className="mastery-card">
+                <div
+                  key={data.topic}
+                  className={`mastery-card ${data.topic === focusTopic ? 'mastery-card-focus' : ''}`}
+                >
                   <div className="mastery-header">
                     <span className="mastery-name">{data.topic}</span>
                     <span className="mastery-score">{(data.mastery_score * 100).toFixed(0)}%</span>
@@ -293,8 +345,15 @@ export default function App() {
                     />
                   </div>
                   <div className="mastery-meta">
-                    <span>Attempts: {data.attempts_count}</span>
-                    <span>Success Rate: {(data.success_rate * 100).toFixed(0)}%</span>
+                    <span>Solved: {data.attempts_count}</span>
+                    <span>Score: {(data.mastery_score * 100).toFixed(0)}%</span>
+                    <button
+                      className={`focus-pick-btn ${data.topic === focusTopic ? 'active' : ''}`}
+                      onClick={() => setFocus(data.topic)}
+                      title={data.topic === focusTopic ? 'Remove focus' : 'Set as focus topic'}
+                    >
+                      {data.topic === focusTopic ? '★ Focused' : '☆ Focus'}
+                    </button>
                   </div>
                 </div>
               ))
@@ -494,6 +553,12 @@ export default function App() {
         {/* TAB 3: RECOMMENDATION */}
         {activeTab === 'recommendation' && (
           <div>
+            {focusTopic && (
+              <div className="rec-focus-note">
+                🎯 Focusing on: <strong>{focusTopic}</strong>
+                <button className="focus-change-btn-inline" onClick={() => setFocus('')}>✕</button>
+              </div>
+            )}
             <h4 className="section-heading">Adaptive Recommendation</h4>
             {recommendation ? (
               <div className="rec-card">
@@ -564,6 +629,69 @@ export default function App() {
                         <span className="sync-stat-label">New Topics</span>
                       </div>
                     )}
+                    {syncStatus.counts.seeded_topics !== undefined && (
+                      <div className="sync-stat">
+                        <span className="sync-stat-num">{syncStatus.counts.seeded_topics}</span>
+                        <span className="sync-stat-label">Seeded</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Analysis card: shown after sync completes */}
+            {analysisData && (
+              <div className="analysis-card">
+                <h4 className="section-heading" style={{ margin: '0 0 14px 0' }}>Your LeetCode Profile</h4>
+
+                {/* Difficulty breakdown */}
+                <div className="diff-bar">
+                  <div className="diff-segment diff-easy" style={{ flex: Math.max(1, analysisData.difficulty_breakdown.Easy || 0) }}>
+                    {analysisData.difficulty_breakdown.Easy || 0} Easy
+                  </div>
+                  <div className="diff-segment diff-medium" style={{ flex: Math.max(1, analysisData.difficulty_breakdown.Medium || 0) }}>
+                    {analysisData.difficulty_breakdown.Medium || 0} Med
+                  </div>
+                  <div className="diff-segment diff-hard" style={{ flex: Math.max(1, analysisData.difficulty_breakdown.Hard || 0) }}>
+                    {analysisData.difficulty_breakdown.Hard || 0} Hard
+                  </div>
+                </div>
+                <div className="total-solved-line">Total Solved: <strong>{analysisData.total_solved}</strong></div>
+
+                {/* Top topics */}
+                <div className="analysis-section">
+                  <div className="section-label">Top Topics</div>
+                  <div className="topic-chips">
+                    {(analysisData.top_topics || []).slice(0, 8).map((t) => (
+                      <span key={t.topic} className="topic-chip">
+                        {t.topic} <span className="chip-count">{t.solved_count}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Weakest topics */}
+                {analysisData.weak_topics && analysisData.weak_topics.length > 0 && (
+                  <div className="analysis-section">
+                    <div className="section-label" style={{ color: '#f59e0b' }}>Weakest Topics (by mastery)</div>
+                    <div className="weak-list">
+                      {analysisData.weak_topics.map((t) => (
+                        <div key={t.topic} className="weak-item">
+                          <span className="weak-topic-name">{t.topic}</span>
+                          <div className="weak-item-right">
+                            <span className="weak-score">{(t.mastery_score * 100).toFixed(0)}%</span>
+                            <button
+                              className="focus-pick-btn"
+                              onClick={() => setFocus(t.topic)}
+                              title="Focus on this topic"
+                            >
+                              ☆ Focus
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

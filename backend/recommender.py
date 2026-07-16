@@ -52,15 +52,18 @@ def update_mastery_on_submission(db: Session, topic_name: str, is_success: bool)
     db.refresh(mastery)
     return mastery
 
-def get_next_problem(db: Session) -> dict:
+def get_next_problem(db: Session, focus_topic: str = None) -> dict:
     """
     Determines the next problem to recommend based on:
     1. Overdue spaced-repetition topics
     2. Lowest mastery score topics
     3. Performance history (success/failure streaks adjusting difficulty)
+
+    If `focus_topic` is provided, recommendations are restricted to that topic
+    (with graceful fallback to the normal logic if it has no available problems).
     """
     now = datetime.utcnow()
-    
+
     # 1. Fetch all topic masteries
     masteries = db.query(TopicMastery).all()
     if not masteries:
@@ -75,13 +78,13 @@ def get_next_problem(db: Session) -> dict:
     # Separate into overdue and standard topics
     overdue_topics = []
     other_topics = []
-    
+
     for m in masteries:
         # Check if topic has any problems associated with it
         has_problems = db.query(Problem).filter(Problem.topics == m.topic).first() is not None
         if not has_problems:
             continue
-            
+
         if m.next_due_date and m.next_due_date <= now:
             overdue_topics.append(m)
         else:
@@ -91,20 +94,28 @@ def get_next_problem(db: Session) -> dict:
     # Overdue topics sorted by lowest mastery first, then other topics sorted by lowest mastery
     overdue_topics.sort(key=lambda x: x.mastery_score)
     other_topics.sort(key=lambda x: x.mastery_score)
-    
+
     selected_topic_record = None
     reason_prefix = ""
-    
-    if overdue_topics:
-        selected_topic_record = overdue_topics[0]
-        reason_prefix = f"Review session is overdue for {selected_topic_record.topic}."
-    elif other_topics:
-        selected_topic_record = other_topics[0]
-        reason_prefix = f"Focusing on your lowest mastery topic: {selected_topic_record.topic}."
-    else:
-        # Fallback to any topic
-        selected_topic_record = masteries[0]
-        reason_prefix = f"Targeting topic: {selected_topic_record.topic}."
+
+    # If a focus topic is set, try to honor it directly.
+    if focus_topic:
+        focus_record = next((m for m in masteries if m.topic == focus_topic), None)
+        if focus_record:
+            selected_topic_record = focus_record
+            reason_prefix = f"Targeting your focus topic: {focus_topic}."
+
+    if not selected_topic_record:
+        if overdue_topics:
+            selected_topic_record = overdue_topics[0]
+            reason_prefix = f"Review session is overdue for {selected_topic_record.topic}."
+        elif other_topics:
+            selected_topic_record = other_topics[0]
+            reason_prefix = f"Focusing on your lowest mastery topic: {selected_topic_record.topic}."
+        else:
+            # Fallback to any topic
+            selected_topic_record = masteries[0]
+            reason_prefix = f"Targeting topic: {selected_topic_record.topic}."
 
     topic = selected_topic_record.topic
     mastery_score = selected_topic_record.mastery_score

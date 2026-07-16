@@ -3,17 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+import math
+from collections import Counter
 
 from backend.database import get_db, engine, Base
 from backend.models import (
-    Problem, Attempt, TopicMastery,
+    Problem, Attempt, TopicMastery, UserConfig,
     SubmissionAnalyzeRequest, SubmissionAnalyzeResponse,
     ProblemRecommendResponse, TopicMasterySchema,
     CheckApproachRequest, CheckApproachResponse,
     GetHintRequest, GetHintResponse,
     GetEdgeCasesRequest, GetEdgeCasesResponse,
     AskHelpRequest, AskHelpResponse,
-    SyncSolvedRequest, SolvedProblemSyncSchema
+    SyncSolvedRequest, SolvedProblemSyncSchema,
+    TopicAnalysisResponse, TopicStatItem, FocusResponse
 )
 from backend.agent import (
     generate_diagnosis,
@@ -26,6 +29,36 @@ from backend.recommender import update_mastery_on_submission, get_next_problem
 
 # Ensure tables are created (just in case)
 Base.metadata.create_all(bind=engine)
+
+
+# --- Lightweight in-place schema migration ---------------------------------
+# Older databases won't have the `is_solved` column on `problems`. Add it if
+# missing so existing installs keep working without a full re-seed.
+def _ensure_is_solved_column():
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    cols = [c["name"] for c in insp.get_columns("problems")] if "problems" in insp.get_table_names() else []
+    if "is_solved" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE problems ADD COLUMN is_solved BOOLEAN DEFAULT 0 NOT NULL"))
+
+
+_ensure_is_solved_column()
+
+
+# Focus-topic key used inside the UserConfig key/value store.
+FOCUS_KEY = "focus_topic"
+
+
+def _seed_mastery_score(solved_count: int) -> float:
+    """Log-scaled mastery seed so synced history yields meaningful scores.
+
+    mastery_score = min(1.0, log(solved + 1) / log(51))
+      1  -> ~0%, 5 -> ~28%, 10 -> ~43%, 25 -> ~63%, 50 -> ~100%
+    """
+    if solved_count <= 0:
+        return 0.0
+    return min(1.0, math.log(solved_count + 1) / math.log(51))
 
 app = FastAPI(title="Autonomous DSA Tutor Agent Backend")
 
@@ -146,9 +179,12 @@ def get_mastery(db: Session = Depends(get_db)):
 @app.get("/problems/next", response_model=ProblemRecommendResponse)
 def get_recommendation(db: Session = Depends(get_db)):
     """
-    Returns the next recommended problem.
+    Returns the next recommended problem. If a focus topic is saved in
+    UserConfig, recommendations prioritize that topic.
     """
-    rec = get_next_problem(db)
+    cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
+    focus_topic = cfg.value if cfg else None
+    rec = get_next_problem(db, focus_topic=focus_topic)
     return ProblemRecommendResponse(
         problem_id=rec["problem_id"],
         title=rec["title"],
@@ -227,16 +263,21 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
     """
     Imports already-solved LeetCode problems from the user's history.
 
-    Registers each problem (upsert) and ensures a baseline TopicMastery row
-    exists per topic without inflating scores or logging synthetic attempts.
+    For each problem: upserts the Problem (marked is_solved=True) and tallies
+    per-topic solved counts. For each topic touched, seeds TopicMastery:
+    attempts_count = solved_count and mastery_score from the log formula — but
+    ONLY when solved_count > existing attempts_count, so live tracking data is
+    never overwritten. success_rate is left at 0 (we have no real attempts yet).
     """
-    synced = 0
     topics_seen = set()
 
+    # 1. Upsert each problem (mark solved) and collect per-topic solved counts.
+    solved_per_topic = Counter()
     for prob in req.problems:
         topics_csv = ", ".join(prob.topics) if prob.topics else "Arrays & Hashing"
         for t in [t.strip() for t in topics_csv.split(",") if t.strip()]:
             topics_seen.add(t)
+            solved_per_topic[t] += 1
 
         url = f"https://leetcode.com/problems/{prob.problem_id}/"
         problem = db.query(Problem).filter(Problem.id == prob.problem_id).first()
@@ -246,33 +287,122 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             problem.url = url
             problem.difficulty = prob.difficulty or problem.difficulty
             problem.topics = topics_csv
+            problem.is_solved = True
         else:
             problem = Problem(
                 id=prob.problem_id,
                 title=prob.title or prob.problem_id,
                 url=url,
                 difficulty=prob.difficulty or "Medium",
-                topics=topics_csv
+                topics=topics_csv,
+                is_solved=True
             )
             db.add(problem)
-        synced += 1
 
-    # Ensure a baseline TopicMastery row exists (score 0, no attempts) for each topic
+    # 2. Seed per-topic mastery from solved counts (never clobber live data).
     new_topics = 0
+    seeded_topics = 0
     for topic in topics_seen:
-        if not db.query(TopicMastery).filter(TopicMastery.topic == topic).first():
-            db.add(TopicMastery(
+        solved_count = solved_per_topic[topic]
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == topic).first()
+        if not mastery:
+            # Brand-new topic: seed from the sync.
+            mastery = TopicMastery(
                 topic=topic,
-                mastery_score=0.0,
-                attempts_count=0,
+                mastery_score=_seed_mastery_score(solved_count),
+                attempts_count=solved_count,
                 success_rate=0.0
-            ))
+            )
+            db.add(mastery)
             new_topics += 1
+            seeded_topics += 1
+        elif solved_count > mastery.attempts_count:
+            # Existing topic whose live attempts are below the sync count: bring
+            # the seed up, but never lower it (live progress wins on the way down).
+            mastery.attempts_count = solved_count
+            seeded_score = _seed_mastery_score(solved_count)
+            mastery.mastery_score = max(mastery.mastery_score, seeded_score)
+            seeded_topics += 1
 
     db.commit()
+    synced = len(req.problems)
     return {
         "synced": synced,
         "topics": len(topics_seen),
         "new_topics": new_topics,
-        "message": f"Synced {synced} problem(s) across {len(topics_seen)} topic(s)."
+        "seeded_topics": seeded_topics,
+        "message": f"Synced {synced} problem(s) across {len(topics_seen)} topic(s); seeded {seeded_topics} topic(s)."
     }
+
+
+@app.get("/topics/analysis", response_model=TopicAnalysisResponse)
+def get_topic_analysis(db: Session = Depends(get_db)):
+    """Full breakdown of solved problems: difficulty + per-topic counts + weakest topics."""
+    solved_problems = db.query(Problem).filter(Problem.is_solved == True).all()  # noqa: E712
+
+    # Difficulty breakdown
+    difficulty_counts = {"Easy": 0, "Medium": 0, "Hard": 0}
+    for p in solved_problems:
+        diff = (p.difficulty or "").capitalize()
+        if diff in difficulty_counts:
+            difficulty_counts[diff] += 1
+
+    # Per-topic solved counts
+    topic_solved = Counter()
+    for p in solved_problems:
+        for t in [x.strip() for x in (p.topics or "").split(",") if x.strip()]:
+            topic_solved[t] += 1
+
+    # Join with mastery scores
+    mastery_rows = {m.topic: m for m in db.query(TopicMastery).all()}
+    items = []
+    for topic, count in topic_solved.items():
+        score = mastery_rows.get(topic).mastery_score if topic in mastery_rows else 0.0
+        items.append(TopicStatItem(topic=topic, solved_count=count, mastery_score=score or 0.0))
+
+    top_topics = sorted(items, key=lambda x: x.solved_count, reverse=True)
+
+    # Weakest topics: lowest mastery among all known topics, capped at 5
+    all_items = []
+    for topic, m in mastery_rows.items():
+        all_items.append(TopicStatItem(
+            topic=topic,
+            solved_count=topic_solved.get(topic, 0),
+            mastery_score=m.mastery_score or 0.0
+        ))
+    weak_topics = sorted(all_items, key=lambda x: x.mastery_score)[:5]
+
+    return TopicAnalysisResponse(
+        total_solved=len(solved_problems),
+        difficulty_breakdown=difficulty_counts,
+        top_topics=top_topics,
+        weak_topics=weak_topics
+    )
+
+
+@app.get("/topics/focus", response_model=FocusResponse)
+def get_focus(db: Session = Depends(get_db)):
+    """Returns the saved focus topic (or None)."""
+    cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
+    return FocusResponse(focus_topic=cfg.value if cfg else None)
+
+
+@app.post("/topics/focus", response_model=FocusResponse)
+def set_focus(topic: Optional[str] = None, db: Session = Depends(get_db)):
+    """Saves (or clears, when topic is empty/None) the focus topic."""
+    value = topic.strip() if topic and topic.strip() else None
+    cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
+    if value is None:
+        # Clear focus
+        if cfg:
+            db.delete(cfg)
+        result = None
+    else:
+        if cfg:
+            cfg.value = value
+        else:
+            cfg = UserConfig(key=FOCUS_KEY, value=value)
+            db.add(cfg)
+        result = value
+    db.commit()
+    return FocusResponse(focus_topic=result)

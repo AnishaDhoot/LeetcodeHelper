@@ -203,4 +203,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  // --- Analysis & Focus actions ---
+  if (request.action === "get_analysis") {
+    backendFetch("/topics/analysis")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_focus") {
+    backendFetch("/topics/focus")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "set_focus") {
+    const topic = request.payload?.topic || "";
+    backendFetch(`/topics/focus?topic=${encodeURIComponent(topic)}`, { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
