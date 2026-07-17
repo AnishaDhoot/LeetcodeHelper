@@ -25,7 +25,7 @@ from backend.agent import (
     analyze_edge_cases,
     answer_custom_question
 )
-from backend.recommender import update_mastery_on_submission, get_next_problem
+from backend.recommender import update_mastery_on_submission, get_next_problem, update_spaced_repetition
 
 # Ensure tables are created (just in case)
 Base.metadata.create_all(bind=engine)
@@ -109,6 +109,7 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
             time_taken_seconds=req.time_taken_seconds
         )
         db.add(attempt)
+        update_spaced_repetition(db, problem.id)
         db.commit()
         return SubmissionAnalyzeResponse(
             root_cause_category="none",
@@ -163,6 +164,7 @@ def record_success(problem_id: str, topic: str, time_taken_seconds: Optional[int
         time_taken_seconds=time_taken_seconds
     )
     db.add(attempt)
+    update_spaced_repetition(db, problem.id)
     db.commit()
     return {"status": "success", "message": "Success logged and mastery updated."}
 
@@ -179,18 +181,15 @@ def get_mastery(db: Session = Depends(get_db)):
 @app.get("/problems/next", response_model=ProblemRecommendResponse)
 def get_recommendation(db: Session = Depends(get_db)):
     """
-    Returns the next recommended problem. If a focus topic is saved in
-    UserConfig, recommendations prioritize that topic.
+    Returns recommended problems (at least 3) and spaced repetition reviews.
+    If a focus topic is saved in UserConfig, recommendations prioritize that topic.
     """
     cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
     focus_topic = cfg.value if cfg else None
-    rec = get_next_problem(db, focus_topic=focus_topic)
+    result = get_next_problem(db, focus_topic=focus_topic)
     return ProblemRecommendResponse(
-        problem_id=rec["problem_id"],
-        title=rec["title"],
-        url=rec["url"],
-        difficulty=rec["difficulty"],
-        reason=rec["reason"]
+        recommendations=result["recommendations"],
+        reviews=result["reviews"]
     )
 
 

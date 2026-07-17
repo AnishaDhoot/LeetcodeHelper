@@ -55,7 +55,18 @@ class UserConfig(Base):
     value = Column(String, nullable=True)
 
 
-# ==========================================
+class SpacedRepetition(Base):
+    __tablename__ = "spaced_repetition"
+
+    problem_id = Column(String, ForeignKey("problems.id"), primary_key=True, index=True)
+    stage = Column(Integer, default=1, nullable=False) # 1: 3 days, 2: 7 days, 3: 14 days, 4: complete
+    last_solved = Column(DateTime, default=datetime.utcnow, nullable=False)
+    next_due = Column(DateTime, nullable=False)
+
+    problem = relationship("Problem")
+
+
+# ==========================================================
 # Pydantic Schemas
 # ==========================================
 
@@ -113,12 +124,26 @@ class SubmissionAnalyzeResponse(BaseModel):
     explanation: str
     suggested_action: str
 
-class ProblemRecommendResponse(BaseModel):
+class RecommendationItem(BaseModel):
     problem_id: str
     title: str
     url: str
     difficulty: str
     reason: str
+
+
+class ReviewItem(BaseModel):
+    problem_id: str
+    title: str
+    url: str
+    difficulty: str
+    due_date: datetime
+    stage: int
+
+
+class ProblemRecommendResponse(BaseModel):
+    recommendations: List[RecommendationItem]
+    reviews: List[ReviewItem]
 
 
 class SolvedProblemSyncSchema(BaseModel):

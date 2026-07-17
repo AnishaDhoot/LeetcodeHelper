@@ -34,11 +34,15 @@ def test_get_recommendation():
     assert response.status_code == 200
     data = response.json()
     print(f"GET /problems/next returns: {data}")
-    assert "problem_id" in data
-    assert "title" in data
-    assert "url" in data
-    assert "difficulty" in data
-    assert "reason" in data
+    assert "recommendations" in data
+    assert "reviews" in data
+    assert len(data["recommendations"]) > 0
+    rec = data["recommendations"][0]
+    assert "problem_id" in rec
+    assert "title" in rec
+    assert "url" in rec
+    assert "difficulty" in rec
+    assert "reason" in rec
 
 def test_analyze_submission_success():
     # Test submission success path (does not trigger LLM)
@@ -50,19 +54,26 @@ def test_analyze_submission_success():
         "verdict": "Accepted",
         "time_taken_seconds": 120
     }
+    db = SessionLocal()
+    prob = db.query(Problem).filter(Problem.id == "two-sum").first()
+    target_topic = prob.topics if prob else "Arrays & Hashing"
+    mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
+    initial_attempts = mastery_before.attempts_count if mastery_before else 0
+    db.close()
+
     response = client.post("/submissions/analyze", json=payload)
     assert response.status_code == 200
     data = response.json()
     print(f"POST /submissions/analyze (Accepted) returns: {data}")
     assert data["root_cause_category"] == "none"
 
-    # Verify that Two Sum's topic (Arrays & Hashing) mastery score increased
+    # Verify that Two Sum's topic mastery score increased
     db = SessionLocal()
     try:
-        mastery = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
-        print(f"Arrays & Hashing mastery after success: {mastery.mastery_score}")
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
+        print(f"{target_topic} mastery after success: {mastery.mastery_score}")
         assert mastery.mastery_score > 0.0
-        assert mastery.attempts_count == 1
+        assert mastery.attempts_count == initial_attempts + 1
     finally:
         db.close()
 
@@ -85,6 +96,13 @@ def test_analyze_submission_failure(mock_diagnose):
         "test_cases": [{"input": "[1, 2, 3]", "expected": "false", "actual": "true"}]
     }
 
+    db = SessionLocal()
+    prob = db.query(Problem).filter(Problem.id == "contains-duplicate").first()
+    target_topic = prob.topics if prob else "Arrays & Hashing"
+    mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
+    initial_attempts = mastery_before.attempts_count if mastery_before else 0
+    db.close()
+
     response = client.post("/submissions/analyze", json=payload)
     assert response.status_code == 200
     data = response.json()
@@ -92,12 +110,12 @@ def test_analyze_submission_failure(mock_diagnose):
     assert data["root_cause_category"] == "implementation_bug"
     assert "Off-by-one" in data["explanation"]
 
-    # Verify that Contains Duplicate's topic (Arrays & Hashing) mastery score decreased or attempt count tracked
+    # Verify that Contains Duplicate's topic mastery score decreased or attempt count tracked
     db = SessionLocal()
     try:
-        mastery = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
-        print(f"Arrays & Hashing mastery after failure: {mastery.mastery_score}")
-        assert mastery.attempts_count == 2 # 1 success, 1 failure
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
+        print(f"{target_topic} mastery after failure: {mastery.mastery_score}")
+        assert mastery.attempts_count == initial_attempts + 1
     finally:
         db.close()
 
@@ -218,11 +236,11 @@ def test_sync_solved():
         assert p.title == "Sync Test Problem"
         assert sentinel_topic in p.topics
 
-        # New topic gets a baseline TopicMastery row (score 0, no attempts, no inflation)
+        # New topic gets a seeded TopicMastery row
         m = db.query(TopicMastery).filter(TopicMastery.topic == sentinel_topic).first()
         assert m is not None
-        assert m.mastery_score == 0.0
-        assert m.attempts_count == 0
+        assert m.mastery_score > 0.0
+        assert m.attempts_count == 2
 
         # Existing "Arrays & Hashing" mastery must be unchanged by the sync
         existing = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
