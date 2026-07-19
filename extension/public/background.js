@@ -168,6 +168,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "reveal_hint") {
+    backendFetch("/hints/reveal", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === "get_edge_cases") {
     backendFetch("/edge-cases/get", { method: "POST", body: request.payload })
       .then((data) => sendResponse({ success: true, data }))

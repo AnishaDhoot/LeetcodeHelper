@@ -201,7 +201,8 @@ const handleVerdictDetected = async (verdict, node) => {
         code: '',
         language: scrapeCurrentLanguage(),
         verdict: 'Accepted',
-        time_taken_seconds: 0
+        time_taken_seconds: 0,
+        hints_used: window.dsaTutor?.hintsUsed || 0
       }
     }, (response) => {
       if (response && response.success) {
@@ -243,7 +244,8 @@ const handleVerdictDetected = async (verdict, node) => {
       language: scrapeCurrentLanguage(),
       verdict: verdict,
       error_details: errorDetails,
-      test_cases: testCases
+      test_cases: testCases,
+      hints_used: window.dsaTutor?.hintsUsed || 0
     }
   }, (response) => {
     if (response && response.success) {
