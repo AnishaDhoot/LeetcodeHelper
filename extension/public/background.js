@@ -2,16 +2,29 @@
 // Handles API calls to the local FastAPI backend to bypass CORS and extension constraints,
 // and fetches the user's LeetCode solved-problem history via scripting injection.
 
-const BACKEND_URL = "http://localhost:8000";
+let DEFAULT_BACKEND_URL = "http://localhost:8000";
+
+async function getBackendUrl() {
+  try {
+    const data = await chrome.storage.local.get("customBackendUrl");
+    if (data && data.customBackendUrl) {
+      return data.customBackendUrl.replace(/\/+$/, "");
+    }
+  } catch (e) {
+    console.warn("[DSA Tutor Background] Failed to read storage URL:", e);
+  }
+  return DEFAULT_BACKEND_URL;
+}
 
 // Generic JSON POST/GET helper that resolves sendResponse.
 async function backendFetch(path, { method = "GET", body } = {}) {
+  const baseUrl = await getBackendUrl();
   const opts = { method, headers: {} };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(`${BACKEND_URL}${path}`, opts);
+  const res = await fetch(`${baseUrl}${path}`, opts);
   if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
   return res.json();
 }
@@ -357,10 +370,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "export_solved_csv") {
     const timeframe = request.payload?.timeframe || "current_week";
-    fetch(`${BACKEND_URL}/export/solved-csv?timeframe=${encodeURIComponent(timeframe)}`)
-      .then((res) => res.text())
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
+    getBackendUrl().then((baseUrl) => {
+      fetch(`${baseUrl}/export/solved-csv?timeframe=${encodeURIComponent(timeframe)}`)
+        .then((res) => res.text())
+        .then((data) => sendResponse({ success: true, data }))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    });
     return true;
   }
 

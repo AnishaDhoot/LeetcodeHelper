@@ -179,13 +179,25 @@ def query_llm(prompt: str, system_prompt: str) -> str:
         return query_ollama(prompt, system_prompt)
 
 
+def repair_json_string(s: str) -> str:
+    """Attempts lightweight repair on invalid JSON strings produced by LLMs."""
+    # Fix trailing commas before closing braces/brackets
+    s = re.sub(r",\s*([\]}])", r"\1", s)
+    return s
+
+
 def query_llm_json(prompt: str, system_prompt: str, default_fallback: dict) -> dict:
     """Queries LLM and ensures response is parsed as a valid JSON dictionary."""
     for attempt in range(2):
         try:
             response_text = query_llm(prompt, system_prompt)
             cleaned = clean_json_string(response_text)
-            parsed = json.loads(cleaned)
+            try:
+                parsed = json.loads(cleaned)
+            except Exception:
+                repaired = repair_json_string(cleaned)
+                parsed = json.loads(repaired)
+
             if isinstance(parsed, dict):
                 return parsed
         except Exception as e:

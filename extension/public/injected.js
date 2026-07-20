@@ -23,8 +23,17 @@ window.addEventListener("message", (event) => {
           }
         }
         code = bestModel.getValue();
-      } else {
-        console.warn("[DSA Tutor Injected] No Monaco models found.");
+      }
+
+      // DOM fallback if Monaco model was missing or empty
+      if (!code) {
+        const viewLines = document.querySelectorAll(".view-lines .view-line");
+        if (viewLines.length > 0) {
+          code = Array.from(viewLines).map(el => el.textContent || "").join("\n");
+        } else {
+          const area = document.querySelector("textarea.inputarea, .CodeMirror");
+          if (area) code = area.value || area.textContent || "";
+        }
       }
       
       window.postMessage({ type: "CODE_VALUE", code: code }, "*");
