@@ -120,7 +120,7 @@ This outputs the packed Chrome Manifest V3 extension inside `extension/dist/`.
 
 ---
 
-## 🧪 Running Diagnostic Tests
+## Running Diagnostic Tests
 
 To verify backend routes, database integrity, and live AI Agent diagnostics:
 
