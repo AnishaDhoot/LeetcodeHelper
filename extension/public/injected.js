@@ -23,6 +23,17 @@ window.addEventListener("message", (event) => {
       window.postMessage({ type: "CODE_VALUE", code: "", error: e.message }, "*");
     }
   }
+
+  if (event.data && event.data.type === "SET_READ_ONLY") {
+    try {
+      const editors = window.monaco?.editor?.getEditors();
+      if (editors && editors.length > 0) {
+        editors[0].updateOptions({ readOnly: !!event.data.readOnly });
+      }
+    } catch (e) {
+      console.error("[DSA Tutor Injected] Error setting readOnly:", e);
+    }
+  }
 });
 
 console.log("[DSA Tutor Injected] Scraper script loaded in page context.");

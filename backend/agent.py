@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import json
 import re
@@ -5,19 +6,29 @@ from dotenv import load_dotenv
 import ollama
 from groq import Groq
 
-# Load environment variables
-load_dotenv()
+# Load environment variables explicitly from backend dir and root dir
+_backend_dir = Path(__file__).resolve().parent
+_root_dir = _backend_dir.parent
 
-# Determine client based on configuration
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+load_dotenv(dotenv_path=_backend_dir / ".env")
+load_dotenv(dotenv_path=_root_dir / ".env")
+
+def get_groq_api_key() -> str:
+    key = os.getenv("GROQ_API_KEY", "")
+    return key.strip() if key else ""
+
+def get_groq_model() -> str:
+    return os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+
+def get_ollama_model() -> str:
+    return os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
 
 def query_ollama(prompt: str, system_prompt: str) -> str:
     """Queries the local Ollama instance."""
     try:
+        model = get_ollama_model()
         response = ollama.chat(
-            model=OLLAMA_MODEL,
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
@@ -31,17 +42,19 @@ def query_ollama(prompt: str, system_prompt: str) -> str:
 
 def query_groq(prompt: str, system_prompt: str) -> str:
     """Queries Groq API as a cloud fallback."""
-    if not GROQ_API_KEY:
+    api_key = get_groq_api_key()
+    if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is not set")
     try:
-        client = Groq(api_key=GROQ_API_KEY)
+        client = Groq(api_key=api_key)
         chat_completion = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            model=GROQ_MODEL,
+            model=get_groq_model(),
             temperature=0.2,
+            max_tokens=350,
             response_format={"type": "json_object"}
         )
         return chat_completion.choices[0].message.content
@@ -115,19 +128,10 @@ def generate_diagnosis(
         "Please diagnose the root cause of this failure and respond in the requested JSON format."
     )
 
-    # Try Ollama (if Groq key is not configured, or if Ollama is preferred)
-    use_groq = GROQ_API_KEY is not None and len(GROQ_API_KEY.strip()) > 0
-    
     response_text = ""
     for attempt in range(2): # Simple retry logic
         try:
-            if use_groq:
-                print(f"Querying Groq using model {GROQ_MODEL}...")
-                response_text = query_groq(user_prompt, system_prompt)
-            else:
-                print(f"Querying Ollama using model {OLLAMA_MODEL}...")
-                response_text = query_ollama(user_prompt, system_prompt)
-
+            response_text = query_llm(user_prompt, system_prompt)
             cleaned_response = clean_json_string(response_text)
             parsed = json.loads(cleaned_response)
             
@@ -156,11 +160,17 @@ def generate_diagnosis(
 
 
 def query_llm(prompt: str, system_prompt: str) -> str:
-    """Queries Groq if key is set, otherwise falls back to local Ollama."""
-    use_groq = GROQ_API_KEY is not None and len(GROQ_API_KEY.strip()) > 0
-    if use_groq:
-        return query_groq(prompt, system_prompt)
+    """Queries Groq if key is set, falling back to local Ollama if Groq fails or is unconfigured."""
+    api_key = get_groq_api_key()
+    if api_key:
+        try:
+            print(f"Querying Groq using model {get_groq_model()}...")
+            return query_groq(prompt, system_prompt)
+        except Exception as e:
+            print(f"Groq query failed ({e}). Falling back to Ollama ({get_ollama_model()})...")
+            return query_ollama(prompt, system_prompt)
     else:
+        print(f"No GROQ_API_KEY found. Querying Ollama using model {get_ollama_model()}...")
         return query_ollama(prompt, system_prompt)
 
 
@@ -224,13 +234,13 @@ def generate_hint(
     language: str,
     constraints: list = None
 ) -> dict:
-    """Provides a progressive, conceptual hint without giving away the direct code."""
+    """Provides an actionable, progressive, conceptual hint without giving away the raw code syntax."""
     system_prompt = (
-        "You are an expert DSA Tutor. Provide a progressive, conceptual hint to help the user solve the problem.\n"
-        "Do NOT provide the direct code solution or code snippets. Instead, explain the conceptual trick, ask guiding questions, or explain the logic.\n"
+        "You are an expert DSA Tutor. Provide an insightful, highly actionable conceptual hint for the given problem.\n"
+        "Explain the core algorithmic pattern, key invariant, or mathematical observation required to solve it efficiently.\n"
         "You MUST respond in strict JSON format with exactly one key:\n"
         "{\n"
-        '  "hint": "Your progressive hint here."\n'
+        '  "hint": "Your detailed, actionable conceptual hint here."\n'
         "}"
     )
 
@@ -240,14 +250,87 @@ def generate_hint(
         f"Language: {language}\n"
         f"Constraints:\n{constraints_str}\n\n"
         f"User's Current Code:\n```\n{code}\n```\n\n"
-        "Please give me a progressive hint to help me move forward."
+        "Please give me a clear, actionable hint to guide me forward."
     )
 
     fallback = {
-        "hint": "Try writing down the problem requirements and dry-running a small testcase on paper."
+        "hint": "Analyze the constraints to determine the target complexity, and look for redundant calculations in your current approach."
     }
 
     return query_llm_json(user_prompt, system_prompt, fallback)
+
+
+def generate_levelled_hint(
+    problem_title: str,
+    code: str,
+    language: str,
+    level: int,
+    constraints: list = None
+) -> dict:
+    """Provides a progressive, conceptual hint at the requested level (1, 2, or 3)
+    without giving away direct code syntax.
+    """
+    if level == 1:
+        level_instruction = (
+            "Level 1 (Core Concept & Pattern Insight): Explain the main intuition and structural insight needed for this problem. "
+            "Identify what invariant, state relationship, or mathematical observation is key, and explain why naive or brute-force intuition breaks down."
+        )
+    elif level == 2:
+        level_instruction = (
+            "Level 2 (Optimal Algorithm & Data Structure Strategy): Explicitly specify the optimal technique "
+            "(e.g. Two Pointers, Monotonic Stack, Sliding Window, Hash Map, Binary Search, DP transition) "
+            "and explain how to organize and process the data to achieve the optimal time and space complexity."
+        )
+    else:
+        level_instruction = (
+            "Level 3 (Detailed Pseudocode & Step-by-Step Logic Walkthrough): Provide a clear, step-by-step logic breakdown "
+            "or pseudocode. Detail the state variable initialization, loop boundary conditions, update rules, and edge checks "
+            "so the user can immediately implement the solution. Do NOT output raw executable syntax for a specific programming language."
+        )
+
+    system_prompt = (
+        "You are an expert DSA Tutor providing progressive hints for a user solving a LeetCode problem.\n"
+        f"{level_instruction}\n\n"
+        "Provide a clear, educational, and actionable response.\n"
+        "You MUST respond in strict JSON format with exactly three keys:\n"
+        "{\n"
+        '  "hint": "Your progressive hint text here.",\n'
+        '  "level": int,\n'
+        '  "has_next": true | false\n'
+        "}"
+    )
+
+    constraints_str = "\n".join(constraints) if constraints else "None provided"
+    user_prompt = (
+        f"Problem: {problem_title}\n"
+        f"Language: {language}\n"
+        f"Constraints:\n{constraints_str}\n\n"
+        f"User's Current Code:\n```\n{code}\n```\n\n"
+        f"Please give me a Level {level} progressive hint."
+    )
+
+    fallback = {
+        "hint": "Dry-run a small example on paper and trace how state variables change across iterations.",
+        "level": level,
+        "has_next": level < 3
+    }
+
+    result = query_llm_json(user_prompt, system_prompt, fallback)
+    try:
+        hint_val = result.get("hint", fallback["hint"])
+        level_val = int(result.get("level", level))
+        has_next_val = bool(result.get("has_next", level < 3)) if level_val < 3 else False
+    except Exception:
+        hint_val = fallback["hint"]
+        level_val = level
+        has_next_val = level < 3
+
+    return {
+        "hint": hint_val,
+        "level": level_val,
+        "has_next": has_next_val
+    }
+
 
 
 def analyze_edge_cases(
@@ -321,4 +404,40 @@ def answer_custom_question(
     }
 
     return query_llm_json(user_prompt, system_prompt, fallback)
+
+
+def generate_explain_back_check(
+    code: str,
+    language: str,
+    user_explanation: str
+) -> dict:
+    """
+    Verifies whether the user's plain-English explanation actually matches the implementation in their code (Tier 3.2).
+    Returns {"matches": bool, "discrepancy_note": str | None}.
+    """
+    system_prompt = (
+        "You are an expert DSA Tutor. The user has submitted a working code solution in the specified programming language "
+        "and provided a brief self-explanation of their approach.\n"
+        "Your task is to check if their explanation accurately reflects the logic and algorithm used in their code.\n"
+        "You MUST respond in strict JSON format with exactly two keys:\n"
+        "{\n"
+        '  "matches": true | false,\n'
+        '  "discrepancy_note": "Null if matches is true, or a brief explanation if their explanation diverges from what the code actually does."\n'
+        "}"
+    )
+
+    user_prompt = (
+        f"Language: {language}\n"
+        f"User's Code:\n```\n{code}\n```\n\n"
+        f"User's Self-Explanation: \"{user_explanation}\"\n\n"
+        "Please check if the explanation matches the code."
+    )
+
+    fallback = {
+        "matches": True,
+        "discrepancy_note": None
+    }
+
+    return query_llm_json(user_prompt, system_prompt, fallback)
+
 

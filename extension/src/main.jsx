@@ -53,7 +53,7 @@ injectScript();
 
 // Request the current editor code from the page-context script (injected.js).
 // Returns a Promise<string> resolving to the Monaco editor contents.
-const getCodeFromPage = (timeoutMs = 1500) => {
+const getCodeFromPage = (timeoutMs = 300) => {
   return new Promise((resolve) => {
     let settled = false;
     const onCodeReceived = (event) => {
@@ -307,6 +307,9 @@ window.dsaTutor.getCode = getCodeFromPage;
 window.dsaTutor.getLanguage = scrapeCurrentLanguage;
 window.dsaTutor.getConstraints = scrapeConstraints;
 window.dsaTutor.getIdentity = scrapeProblemIdentity;
+window.dsaTutor.setEditorReadOnly = (readOnly) => {
+  window.postMessage({ type: 'SET_READ_ONLY', readOnly }, '*');
+};
 
 // Start observing
 observer.observe(document.body, { childList: true, subtree: true });

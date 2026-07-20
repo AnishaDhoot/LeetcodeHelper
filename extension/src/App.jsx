@@ -18,8 +18,12 @@ export default function App() {
   const [diagnosis, setDiagnosis] = useState(null);
   const [error, setError] = useState(null);
 
-  // Code Coach state
-  const [coachResult, setCoachResult] = useState(null); // {type, data}
+  // Code Coach states (persistent per tool)
+  const [approachResult, setApproachResult] = useState(null);
+  const [edgeResult, setEdgeResult] = useState(null);
+  const [askResults, setAskResults] = useState([]);
+  const [diagnosisResult, setDiagnosisResult] = useState(null);
+  const [coachFilter, setCoachFilter] = useState('all');
   const [coachLoading, setCoachLoading] = useState(null); // current action id or null
   const [coachError, setCoachError] = useState(null);
   const [askInput, setAskInput] = useState('');
@@ -40,6 +44,181 @@ export default function App() {
 
   // Topic analysis state (loaded after sync or on mount)
   const [analysisData, setAnalysisData] = useState(null);
+
+  // New Roadmap States (Tiers 1 - 5)
+  const [streakData, setStreakData] = useState({ current_streak_days: 0, problems_today: 0, solved_today: 0 });
+  const [companies, setCompanies] = useState([]);
+  const [selectedCompany, setSelectedCompany] = useState('');
+  const [weakPairs, setWeakPairs] = useState([]);
+  const [estimateTime, setEstimateTime] = useState('O(N)');
+  const [estimateSpace, setEstimateSpace] = useState('O(1)');
+  const [showEstimateForm, setShowEstimateForm] = useState(false);
+  const [estimateSubmitted, setEstimateSubmitted] = useState(false);
+  const [showExplainBack, setShowExplainBack] = useState(false);
+  const [userExplanationInput, setUserExplanationInput] = useState('');
+  const [explainBackResult, setExplainBackResult] = useState(null);
+
+  // Mock Mode States
+  const [isMockMode, setIsMockMode] = useState(false);
+  const [mockSession, setMockSession] = useState(null);
+  const [mockApproachText, setMockApproachText] = useState('');
+  const [mockApproachSubmitted, setMockApproachSubmitted] = useState(false);
+  const [mockTimerSeconds, setMockTimerSeconds] = useState(2700);
+
+  const fetchStreak = () => {
+    chrome.runtime.sendMessage({ action: 'get_streak' }, (res) => {
+      if (res && res.success) setStreakData(res.data);
+    });
+  };
+
+  const fetchCompanies = () => {
+    chrome.runtime.sendMessage({ action: 'get_companies' }, (res) => {
+      if (res && res.success) setCompanies(res.data || []);
+    });
+  };
+
+  const fetchWeakPairs = () => {
+    chrome.runtime.sendMessage({ action: 'get_weak_pairs' }, (res) => {
+      if (res && res.success) setWeakPairs(res.data || []);
+    });
+  };
+
+  // CSV Export state
+  const [csvTimeframe, setCsvTimeframe] = useState('current_week');
+  const [exportingCsv, setExportingCsv] = useState(false);
+
+  // Problem Notes & Personal Difficulty states
+  const [userNotesInput, setUserNotesInput] = useState('');
+  const [personalDifficultyInput, setPersonalDifficultyInput] = useState('');
+  const [savingNotesStatus, setSavingNotesStatus] = useState(false);
+
+  const fetchProblemDetails = (probId) => {
+    if (!probId) return;
+    chrome.runtime.sendMessage({ action: 'get_problem_details', payload: { problem_id: probId } }, (res) => {
+      if (res && res.success && res.data) {
+        setUserNotesInput(res.data.user_notes || '');
+        setPersonalDifficultyInput(res.data.personal_difficulty || '');
+      }
+    });
+  };
+
+  const saveNotes = (notes, diff) => {
+    const identity = window.dsaTutor?.getIdentity ? window.dsaTutor.getIdentity() : null;
+    const probId = identity?.problemId || currentProblemId;
+    if (!probId) return;
+    const payload = {
+      problem_id: probId,
+      problem_title: identity?.problemTitle || probId,
+      user_notes: notes,
+      personal_difficulty: diff
+    };
+    chrome.runtime.sendMessage({ action: 'save_problem_notes', payload }, () => {
+      setSavingNotesStatus(true);
+      setTimeout(() => setSavingNotesStatus(false), 2000);
+    });
+  };
+
+  const exportWeeklyJournal = () => {
+    chrome.runtime.sendMessage({ action: 'get_weekly_journal' }, (res) => {
+      if (res && res.success && res.data.markdown_text) {
+        const blob = new Blob([res.data.markdown_text], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `weekly_dsa_digest_${res.data.period_end}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    });
+  };
+
+  const exportSolvedCsv = () => {
+    setExportingCsv(true);
+    chrome.runtime.sendMessage({ action: 'export_solved_csv', payload: { timeframe: csvTimeframe } }, (res) => {
+      setExportingCsv(false);
+      if (res && res.success && res.data) {
+        const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const today = new Date().toISOString().slice(0, 10);
+        a.download = `dsa_solved_problems_${csvTimeframe}_${today}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        alert(res?.error || 'Failed to export CSV.');
+      }
+    });
+  };
+
+  const startMockInterview = () => {
+    chrome.runtime.sendMessage({ action: 'mock_start', payload: { company: selectedCompany || null } }, (res) => {
+      if (res && res.success) {
+        setMockSession(res.data);
+        setMockApproachSubmitted(false);
+        setMockTimerSeconds(res.data.time_limit_seconds || 2700);
+        setIsMockMode(true);
+        if (window.dsaTutor?.setEditorReadOnly) {
+          window.dsaTutor.setEditorReadOnly(true);
+        }
+      }
+    });
+  };
+
+  const submitMockApproach = () => {
+    if (!mockApproachText.trim() || !mockSession) return;
+    chrome.runtime.sendMessage({ action: 'mock_approach', payload: { session_id: mockSession.session_id, approach_text: mockApproachText } }, (res) => {
+      if (res && res.success) {
+        setMockApproachSubmitted(true);
+        if (window.dsaTutor?.setEditorReadOnly) {
+          window.dsaTutor.setEditorReadOnly(false);
+        }
+      }
+    });
+  };
+
+  const runExplainBackCheck = async () => {
+    if (!userExplanationInput.trim()) return;
+    try {
+      const ctx = await gatherContext(true);
+      const payload = { problem_id: ctx.problem_id, code: ctx.code, language: ctx.language, user_explanation: userExplanationInput.trim() };
+      chrome.runtime.sendMessage({ action: 'explain_back', payload }, (res) => {
+        if (res && res.success) {
+          setExplainBackResult(res.data);
+        }
+      });
+    } catch (e) {
+      console.warn('Explain back failed:', e);
+    }
+  };
+
+  const runComplexityWithEstimate = async () => {
+    if (!estimateSubmitted) {
+      setShowEstimateForm(true);
+      return;
+    }
+    setCoachError(null);
+    setCoachLoading('approach');
+    try {
+      const ctx = await gatherContext(true);
+      const estPayload = { problem_id: ctx.problem_id, time_complexity: estimateTime, space_complexity: estimateSpace };
+      chrome.runtime.sendMessage({ action: 'critique_estimate', payload: estPayload }, () => {
+        chrome.runtime.sendMessage({ action: 'critique_reveal', payload: ctx }, (response) => {
+          setCoachLoading(null);
+          if (response && response.success) {
+            setApproachResult(response.data);
+            setIsOpen(true);
+            setActiveTab('coach');
+          } else {
+            setCoachError(response?.error || 'Request failed.');
+          }
+        });
+      });
+    } catch (e) {
+      setCoachLoading(null);
+      setCoachError(e.message || String(e));
+    }
+  };
 
   // Helper: gather current code/lang/constraints + identity, throw on empty code.
   const gatherContext = async (requireCode = true) => {
@@ -64,14 +243,17 @@ export default function App() {
   // Generic Code Coach action runner.
   const runCoachAction = async (actionId, messageAction) => {
     setCoachError(null);
-    setCoachResult(null);
     setCoachLoading(actionId);
     try {
       const ctx = await gatherContext(true);
       chrome.runtime.sendMessage({ action: messageAction, payload: ctx }, (response) => {
         setCoachLoading(null);
         if (response && response.success) {
-          setCoachResult({ type: actionId, data: response.data });
+          if (actionId === 'edge') {
+            setEdgeResult(response.data);
+          } else if (actionId === 'approach') {
+            setApproachResult(response.data);
+          }
           setIsOpen(true);
           setActiveTab('coach');
         } else {
@@ -106,8 +288,6 @@ export default function App() {
           if (window.dsaTutor) {
             window.dsaTutor.hintsUsed = response.data.level;
           }
-          
-          setCoachResult({ type: 'progressive_hint' });
           setIsOpen(true);
           setActiveTab('coach');
         } else {
@@ -123,16 +303,17 @@ export default function App() {
   // Ask a free-form question about the current code.
   const runAskHelp = async () => {
     if (!askInput.trim()) return;
+    const currentQ = askInput.trim();
     setCoachError(null);
-    setCoachResult(null);
     setCoachLoading('ask');
     try {
       const ctx = await gatherContext(true);
-      const payload = { ...ctx, question: askInput.trim() };
+      const payload = { ...ctx, question: currentQ };
       chrome.runtime.sendMessage({ action: 'ask_help', payload }, (response) => {
         setCoachLoading(null);
         if (response && response.success) {
-          setCoachResult({ type: 'ask', data: response.data, question: askInput.trim() });
+          setAskResults(prev => [...prev, { id: Date.now(), question: currentQ, answer: response.data.answer }]);
+          setAskInput('');
           setIsOpen(true);
           setActiveTab('coach');
         } else {
@@ -174,6 +355,7 @@ export default function App() {
         fetchFocus();
         fetchAnalysis();
         fetchRecommendation();
+        fetchStreak();
       });
     });
   };
@@ -210,18 +392,39 @@ export default function App() {
     });
   };
 
-  // Polling to detect problem page navigation
+  const clearCurrentCoachState = () => {
+    setApproachResult(null);
+    setEdgeResult(null);
+    setAskResults([]);
+    setDiagnosisResult(null);
+    setHintsList([]);
+    setCurrentHintLevel(0);
+    setShowEstimateForm(false);
+    setEstimateSubmitted(false);
+    setUserExplanationInput('');
+    setExplainBackResult(null);
+    setShowExplainBack(false);
+    setCoachError(null);
+    setAskInput('');
+    setCoachFilter('all');
+    if (window.dsaTutor) {
+      window.dsaTutor.hintsUsed = 0;
+    }
+  };
+
+  // Instant URL change listener + fast polling to detect problem navigation
   useEffect(() => {
+    let lastUrl = window.location.href;
+
     const checkProblemChange = () => {
       try {
+        const currentUrl = window.location.href;
         const identity = window.dsaTutor?.getIdentity ? window.dsaTutor.getIdentity() : null;
-        if (identity && identity.problemId !== currentProblemId) {
+        if (identity && (identity.problemId !== currentProblemId || currentUrl !== lastUrl)) {
+          lastUrl = currentUrl;
           setCurrentProblemId(identity.problemId);
-          setHintsList([]);
-          setCurrentHintLevel(0);
-          if (window.dsaTutor) {
-            window.dsaTutor.hintsUsed = 0;
-          }
+          clearCurrentCoachState();
+          fetchProblemDetails(identity.problemId);
         }
       } catch (e) {
         // Ignore
@@ -229,9 +432,29 @@ export default function App() {
     };
 
     checkProblemChange();
-    const interval = setInterval(checkProblemChange, 1500);
-    return () => clearInterval(interval);
+    window.addEventListener('popstate', checkProblemChange);
+    const interval = setInterval(checkProblemChange, 500);
+
+    return () => {
+      window.removeEventListener('popstate', checkProblemChange);
+      clearInterval(interval);
+    };
   }, [currentProblemId]);
+
+  // Mock interview timer
+  useEffect(() => {
+    if (!isMockMode || !mockSession) return;
+    const t = setInterval(() => {
+      setMockTimerSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(t);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [isMockMode, mockSession]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -240,6 +463,9 @@ export default function App() {
     checkBackendHealth();
     fetchFocus();
     fetchAnalysis();
+    fetchStreak();
+    fetchCompanies();
+    fetchWeakPairs();
 
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
@@ -259,12 +485,16 @@ export default function App() {
         setIsOpen(true);
         setActiveTab('coach');
         // Auto-diagnosis results go into the Code Coach result area too.
-        setCoachResult({ type: 'diagnosis', data: diagResult });
+        setDiagnosisResult(diagResult);
         setCoachError(null);
         setCoachLoading(null);
+        if (diagResult.verdict === 'Accepted') {
+          setShowExplainBack(true);
+        }
         // Refresh mastery & recommendations as they might have changed
         fetchMastery();
         fetchRecommendation();
+        fetchStreak();
       },
       setError: (errMessage) => {
         setLoading(false);
@@ -275,6 +505,7 @@ export default function App() {
       refreshData: () => {
         fetchMastery();
         fetchRecommendation();
+        fetchStreak();
       }
     });
 
@@ -301,8 +532,8 @@ export default function App() {
     });
   };
 
-  const fetchRecommendation = () => {
-    chrome.runtime.sendMessage({ action: 'get_recommendation' }, (response) => {
+  const fetchRecommendation = (comp = selectedCompany) => {
+    chrome.runtime.sendMessage({ action: 'get_recommendation', payload: { company: comp || null } }, (response) => {
       if (response && response.success) {
         setRecommendation(response.data);
       } else {
@@ -328,7 +559,6 @@ export default function App() {
       {/* Header */}
       <div className="tutor-header">
         <h3 className="tutor-title">
-          {/* Logo mark – geometric bracket */}
           <span className="logo-mark">
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#71717a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
@@ -336,13 +566,44 @@ export default function App() {
             </svg>
           </span>
           Kode
+          <span style={{ fontSize: '11px', background: '#27272a', padding: '2px 6px', borderRadius: '10px', color: '#f59e0b', fontWeight: '500' }}>
+            🔥 {streakData.current_streak_days}d
+          </span>
         </h3>
-        <button className="close-btn" onClick={() => setIsOpen(false)} title="Close">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={() => {
+              if (!isMockMode) {
+                startMockInterview();
+              } else {
+                setIsMockMode(false);
+                if (window.dsaTutor?.setEditorReadOnly) {
+                  window.dsaTutor.setEditorReadOnly(false);
+                }
+              }
+            }}
+            style={{
+              background: isMockMode ? '#ef444422' : '#27272a',
+              color: isMockMode ? '#f87171' : '#a1a1aa',
+              border: `1px solid ${isMockMode ? '#ef444455' : '#3f3f46'}`,
+              borderRadius: '6px',
+              padding: '2px 8px',
+              fontSize: '11px',
+              cursor: 'pointer',
+              fontWeight: '500'
+            }}
+          >
+            {isMockMode ? '⏱ Mocking' : 'Practice'}
+          </button>
+
+          <button className="close-btn" onClick={() => setIsOpen(false)} title="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Tabs Menu */}
@@ -390,6 +651,43 @@ export default function App() {
 
       {/* Content Area */}
       <div className="tutor-content">
+        {/* Mock Interview Active Session Banner (Tier 4.1) */}
+        {isMockMode && mockSession && (
+          <div className="info-section" style={{ borderColor: '#ef444466', background: '#ef444415', marginBottom: '14px' }}>
+            <div className="section-label" style={{ color: '#f87171', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>⏱ Mock Interview Mode</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '13px', background: '#27272a', padding: '2px 6px', borderRadius: '4px', color: '#fff' }}>
+                {Math.floor(mockTimerSeconds / 60)}:{String(mockTimerSeconds % 60).padStart(2, '0')}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', marginTop: '6px', color: '#e4e4e7' }}>
+              Problem: <strong>{mockSession.problem_title}</strong> ({mockSession.difficulty})
+            </div>
+            {!mockApproachSubmitted ? (
+              <div style={{ marginTop: '8px' }}>
+                <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
+                  🔒 Code Editor Locked! Write your approach first to unlock:
+                </div>
+                <textarea
+                  className="ask-input"
+                  rows={2}
+                  placeholder="Outline your algorithm approach, data structures, and edge cases..."
+                  value={mockApproachText}
+                  onChange={(e) => setMockApproachText(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+                <button className="coach-btn" style={{ marginTop: '6px', width: '100%' }} onClick={submitMockApproach}>
+                  Submit Approach & Unlock Editor
+                </button>
+              </div>
+            ) : (
+              <div style={{ fontSize: '11px', color: '#4ade80', marginTop: '6px' }}>
+                ✓ Approach accepted! Code editor unlocked. Solve and submit on LeetCode before time expires.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* TAB 1: MASTERY OVERVIEW */}
         {activeTab === 'mastery' && (
           <div>
@@ -403,6 +701,18 @@ export default function App() {
                 <button className="focus-change-btn" onClick={() => setFocus('')}>
                   Clear
                 </button>
+              </div>
+            )}
+
+            {/* Weak Pairs Prerequisite Warning (Tier 2.1) */}
+            {weakPairs.length > 0 && (
+              <div className="info-section alt-section" style={{ marginBottom: '12px', borderColor: '#f59e0b44', background: '#f59e0b11' }}>
+                <div className="section-label alt-label" style={{ color: '#fbbf24' }}>
+                  💡 Prerequisite Review Suggestion
+                </div>
+                <div className="section-content" style={{ fontSize: '12px', color: '#d4d4d8' }}>
+                  Review <strong>{weakPairs[0].topic_a}</strong> before tackling <strong>{weakPairs[0].topic_b}</strong> (co-occurred {weakPairs[0].co_occurrence} times).
+                </div>
               </div>
             )}
 
@@ -451,10 +761,52 @@ export default function App() {
         {/* TAB 2: CODE COACH */}
         {activeTab === 'coach' && (
           <div>
-            <h4 className="section-heading">Code Coach</h4>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <h4 className="section-heading" style={{ margin: 0 }}>Code Coach</h4>
+              {(approachResult || hintsList.length > 0 || edgeResult || askResults.length > 0 || diagnosisResult || coachError) && (
+                <button
+                  onClick={clearCurrentCoachState}
+                  style={{ background: 'transparent', color: '#71717a', border: 'none', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  title="Clear all results for current problem"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  Reset View
+                </button>
+              )}
+            </div>
             <p className="coach-intro">
               Analyze the code currently inside LeetCode's editor using autonomous diagnostic tools.
             </p>
+
+            {/* Post-Solve Explain-Back Check (Tier 3.2) */}
+            {showExplainBack && (
+              <div className="info-section alt-section" style={{ marginBottom: '14px', borderColor: '#22c55e44', background: '#22c55e11' }}>
+                <div className="section-label alt-label" style={{ color: '#4ade80' }}>
+                  🎉 Problem Solved! Explain your approach
+                </div>
+                <textarea
+                  className="ask-input"
+                  rows={2}
+                  placeholder="Briefly explain how your solution works in 1-2 sentences..."
+                  value={userExplanationInput}
+                  onChange={(e) => setUserExplanationInput(e.target.value)}
+                  style={{ marginTop: '6px', fontSize: '12px' }}
+                />
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <button className="coach-btn" style={{ flex: 1 }} onClick={runExplainBackCheck}>
+                    Verify Explanation
+                  </button>
+                  <button className="coach-btn secondary" style={{ flex: 'none' }} onClick={() => setShowExplainBack(false)}>
+                    Skip
+                  </button>
+                </div>
+                {explainBackResult && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: explainBackResult.matches ? '#4ade80' : '#fbbf24' }}>
+                    {explainBackResult.matches ? '✓ Great explanation! Perfectly matches your code.' : `⚠️ ${explainBackResult.discrepancy_note}`}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="coach-actions">
@@ -524,15 +876,123 @@ export default function App() {
               </div>
             )}
 
-            {/* Results */}
-            {!coachLoading && coachResult && (
-              <div className="coach-result">
-                {/* Approach critique */}
-                {coachResult.type === 'approach' && (
-                  <>
+            {/* Multi-Tool Results (Stacked & Persistent) */}
+            {!coachLoading && (approachResult || hintsList.length > 0 || edgeResult || askResults.length > 0 || diagnosisResult) && (
+              <div className="coach-result-container" style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '12px' }}>
+                
+                {/* Filter bar if multiple outputs exist */}
+                {((approachResult ? 1 : 0) + (hintsList.length ? 1 : 0) + (edgeResult ? 1 : 0) + (askResults.length ? 1 : 0) + (diagnosisResult ? 1 : 0)) > 1 && (
+                  <div className="filter-chips-bar" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                    <button
+                      className={`filter-chip ${coachFilter === 'all' ? 'active' : ''}`}
+                      onClick={() => setCoachFilter('all')}
+                      style={{ background: coachFilter === 'all' ? '#3f3f46' : '#18181b', color: coachFilter === 'all' ? '#fff' : '#a1a1aa', border: '1px solid #27272a', borderRadius: '12px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+                    >
+                      All ({ (approachResult ? 1 : 0) + (hintsList.length ? 1 : 0) + (edgeResult ? 1 : 0) + (askResults.length ? 1 : 0) + (diagnosisResult ? 1 : 0) })
+                    </button>
+                    {approachResult && (
+                      <button
+                        className={`filter-chip ${coachFilter === 'approach' ? 'active' : ''}`}
+                        onClick={() => setCoachFilter('approach')}
+                        style={{ background: coachFilter === 'approach' ? '#3f3f46' : '#18181b', color: coachFilter === 'approach' ? '#fff' : '#a1a1aa', border: '1px solid #27272a', borderRadius: '12px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        Approach
+                      </button>
+                    )}
+                    {hintsList.length > 0 && (
+                      <button
+                        className={`filter-chip ${coachFilter === 'hints' ? 'active' : ''}`}
+                        onClick={() => setCoachFilter('hints')}
+                        style={{ background: coachFilter === 'hints' ? '#3f3f46' : '#18181b', color: coachFilter === 'hints' ? '#fff' : '#a1a1aa', border: '1px solid #27272a', borderRadius: '12px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        Hints ({hintsList.length})
+                      </button>
+                    )}
+                    {edgeResult && (
+                      <button
+                        className={`filter-chip ${coachFilter === 'edge' ? 'active' : ''}`}
+                        onClick={() => setCoachFilter('edge')}
+                        style={{ background: coachFilter === 'edge' ? '#3f3f46' : '#18181b', color: coachFilter === 'edge' ? '#fff' : '#a1a1aa', border: '1px solid #27272a', borderRadius: '12px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        Edge Cases
+                      </button>
+                    )}
+                    {askResults.length > 0 && (
+                      <button
+                        className={`filter-chip ${coachFilter === 'ask' ? 'active' : ''}`}
+                        onClick={() => setCoachFilter('ask')}
+                        style={{ background: coachFilter === 'ask' ? '#3f3f46' : '#18181b', color: coachFilter === 'ask' ? '#fff' : '#a1a1aa', border: '1px solid #27272a', borderRadius: '12px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        Q&A ({askResults.length})
+                      </button>
+                    )}
+                    {diagnosisResult && (
+                      <button
+                        className={`filter-chip ${coachFilter === 'diagnosis' ? 'active' : ''}`}
+                        onClick={() => setCoachFilter('diagnosis')}
+                        style={{ background: coachFilter === 'diagnosis' ? '#3f3f46' : '#18181b', color: coachFilter === 'diagnosis' ? '#fff' : '#a1a1aa', border: '1px solid #27272a', borderRadius: '12px', padding: '3px 10px', fontSize: '11px', cursor: 'pointer' }}
+                      >
+                        Diagnosis
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* 1. Auto-diagnosis Result Section */}
+                {diagnosisResult && (coachFilter === 'all' || coachFilter === 'diagnosis') && (
+                  <div className="coach-result">
+                    <div className="diagnosis-badges">
+                      <span className={`verdict-badge ${diagnosisResult.verdict === 'Accepted' ? 'success' : 'failure'}`}>
+                        {diagnosisResult.verdict === 'Accepted' ? (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><polyline points="20 6 9 17 4 12"/></svg>
+                            Accepted
+                          </>
+                        ) : (
+                          <>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            {diagnosisResult.verdict || 'Failed'}
+                          </>
+                        )}
+                      </span>
+                      {diagnosisResult.verdict !== 'Accepted' && diagnosisResult.root_cause_category && CATEGORY_MAP[diagnosisResult.root_cause_category] && (
+                        <span
+                          className="category-tag"
+                          style={{
+                            color: CATEGORY_MAP[diagnosisResult.root_cause_category].color,
+                            borderColor: `${CATEGORY_MAP[diagnosisResult.root_cause_category].color}30`,
+                            background: `${CATEGORY_MAP[diagnosisResult.root_cause_category].color}12`
+                          }}
+                        >
+                          {CATEGORY_MAP[diagnosisResult.root_cause_category].emoji} {CATEGORY_MAP[diagnosisResult.root_cause_category].label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="info-section">
+                      <div className="section-label">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        Root Cause Analysis
+                      </div>
+                      <div className="section-content">{diagnosisResult.explanation}</div>
+                    </div>
+                    {diagnosisResult.suggested_action && (
+                      <div className="info-section alt-section">
+                        <div className="section-label alt-label">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                          Suggested Action
+                        </div>
+                        <div className="section-content">{diagnosisResult.suggested_action}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 2. Approach Critique Section */}
+                {approachResult && (coachFilter === 'all' || coachFilter === 'approach') && (
+                  <div className="coach-result">
                     <div className="coach-result-head">
-                      <span className={`tag-pill ${coachResult.data.is_optimal ? 'tag-good' : 'tag-bad'}`}>
-                        {coachResult.data.is_optimal ? (
+                      <span className={`tag-pill ${approachResult.is_optimal ? 'tag-good' : 'tag-bad'}`}>
+                        {approachResult.is_optimal ? (
                           <>
                             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><polyline points="20 6 9 17 4 12"/></svg>
                             Optimal Approach
@@ -548,11 +1008,11 @@ export default function App() {
                     <div className="complexity-row">
                       <div>
                         <span className="complexity-label">Current Complexity</span>
-                        <span>{coachResult.data.current_complexity}</span>
+                        <span>{approachResult.current_complexity}</span>
                       </div>
                       <div>
                         <span className="complexity-label">Optimal Complexity</span>
-                        <span>{coachResult.data.optimal_complexity}</span>
+                        <span>{approachResult.optimal_complexity}</span>
                       </div>
                     </div>
                     <div className="info-section">
@@ -560,55 +1020,57 @@ export default function App() {
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                         Feedback
                       </div>
-                      <div className="section-content">{coachResult.data.feedback}</div>
+                      <div className="section-content">{approachResult.feedback}</div>
                     </div>
                     <div className="info-section alt-section">
                       <div className="section-label alt-label">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         Alternative Approach
                       </div>
-                      <div className="section-content">{coachResult.data.alternative_approach}</div>
+                      <div className="section-content">{approachResult.alternative_approach}</div>
                     </div>
-                  </>
-                )}
-
-                {/* Progressive Hints */}
-                {(coachResult.type === 'progressive_hint' || coachResult.type === 'hint') && hintsList.length > 0 && (
-                  <div className="progressive-hints-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-                    {hintsList.map((h, index) => (
-                      <div key={h.level} className="info-section alt-section" style={{ margin: 0 }}>
-                        <div className="section-label alt-label" style={{ display: 'flex', alignItems: 'center' }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
-                          {h.level === 1 ? '💡 Level 1: Conceptual Strategy' : h.level === 2 ? '⚙️ Level 2: Algorithmic Approach' : '🛠️ Level 3: Pseudocode Breakdown'}
-                        </div>
-                        <div className="section-content" style={{ whiteSpace: 'pre-wrap' }}>{h.hint}</div>
-                      </div>
-                    ))}
-                    
-                    {currentHintLevel < 3 && (
-                      <div style={{ marginTop: '4px' }}>
-                        <button
-                          className={`coach-btn ${coachLoading === 'hint' ? 'loading' : ''}`}
-                          disabled={!!coachLoading}
-                          onClick={revealNextHint}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '6px', verticalAlign: 'middle'}}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
-                          {coachLoading === 'hint' ? 'Thinking…' : `Reveal Next Hint (Level ${currentHintLevel + 1})`}
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
 
-                {/* Edge cases */}
-                {coachResult.type === 'edge' && (
-                  <>
+                {/* 3. Progressive Hints Section */}
+                {hintsList.length > 0 && (coachFilter === 'all' || coachFilter === 'hints') && (
+                  <div className="coach-result">
+                    <div className="progressive-hints-container" style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+                      {hintsList.map((h) => (
+                        <div key={h.level} className="info-section alt-section" style={{ margin: 0 }}>
+                          <div className="section-label alt-label" style={{ display: 'flex', alignItems: 'center' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                            {h.level === 1 ? '💡 Level 1: Conceptual Strategy' : h.level === 2 ? '⚙️ Level 2: Algorithmic Strategy' : '🛠️ Level 3: Pseudocode Breakdown'}
+                          </div>
+                          <div className="section-content" style={{ whiteSpace: 'pre-wrap' }}>{h.hint}</div>
+                        </div>
+                      ))}
+                      
+                      {currentHintLevel < 3 && (
+                        <div style={{ marginTop: '4px' }}>
+                          <button
+                            className={`coach-btn ${coachLoading === 'hint' ? 'loading' : ''}`}
+                            disabled={!!coachLoading}
+                            onClick={revealNextHint}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '6px', verticalAlign: 'middle'}}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1 .3 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                            {coachLoading === 'hint' ? 'Thinking…' : `Reveal Next Hint (Level ${currentHintLevel + 1})`}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Edge Cases Section */}
+                {edgeResult && (coachFilter === 'all' || coachFilter === 'edge') && (
+                  <div className="coach-result">
                     <div className="info-section">
                       <div className="section-label">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                         Edge Cases Detected
                       </div>
-                      {(coachResult.data.edge_cases || []).map((ec, i) => (
+                      {(edgeResult.edge_cases || []).map((ec, i) => (
                         <div key={i} className="edge-case-item">
                           <span className={`handled-tag ${ec.handled ? 'handled-yes' : 'handled-no'}`}>
                             {ec.handled ? 'Handled' : 'Missing'}
@@ -625,73 +1087,29 @@ export default function App() {
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
                         Constraints Critique
                       </div>
-                      <div className="section-content">{coachResult.data.constraints_critique}</div>
+                      <div className="section-content">{edgeResult.constraints_critique}</div>
                     </div>
-                  </>
-                )}
-
-                {/* Ask help answer */}
-                {coachResult.type === 'ask' && (
-                  <div className="info-section alt-section">
-                    <div className="section-label alt-label">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                      Tutor Response
-                    </div>
-                    {coachResult.question && (
-                      <div className="ask-question">Q: {coachResult.question}</div>
-                    )}
-                    <div className="section-content">{coachResult.data.answer}</div>
                   </div>
                 )}
 
-                {/* Auto-diagnosis on failed submission */}
-                {coachResult.type === 'diagnosis' && (
-                  <>
-                    <div className="diagnosis-badges">
-                      <span className={`verdict-badge ${coachResult.data.verdict === 'Accepted' ? 'success' : 'failure'}`}>
-                        {coachResult.data.verdict === 'Accepted' ? (
-                          <>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><polyline points="20 6 9 17 4 12"/></svg>
-                            Accepted
-                          </>
-                        ) : (
-                          <>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '6px'}}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                            {coachResult.data.verdict || 'Failed'}
-                          </>
-                        )}
-                      </span>
-                      {coachResult.data.verdict !== 'Accepted' && coachResult.data.root_cause_category && CATEGORY_MAP[coachResult.data.root_cause_category] && (
-                        <span
-                          className="category-tag"
-                          style={{
-                            color: CATEGORY_MAP[coachResult.data.root_cause_category].color,
-                            borderColor: `${CATEGORY_MAP[coachResult.data.root_cause_category].color}30`,
-                            background: `${CATEGORY_MAP[coachResult.data.root_cause_category].color}12`
-                          }}
-                        >
-                          {CATEGORY_MAP[coachResult.data.root_cause_category].emoji} {CATEGORY_MAP[coachResult.data.root_cause_category].label}
-                        </span>
-                      )}
-                    </div>
-                    <div className="info-section">
-                      <div className="section-label">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                        Root Cause Analysis
-                      </div>
-                      <div className="section-content">{coachResult.data.explanation}</div>
-                    </div>
-                    {coachResult.data.suggested_action && (
-                      <div className="info-section alt-section">
+                {/* 5. Custom Q&A Section */}
+                {askResults.length > 0 && (coachFilter === 'all' || coachFilter === 'ask') && (
+                  <div className="coach-result" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {askResults.map((item) => (
+                      <div key={item.id} className="info-section alt-section">
                         <div className="section-label alt-label">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                          Suggested Action
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                          Tutor Q&A Response
                         </div>
-                        <div className="section-content">{coachResult.data.suggested_action}</div>
+                        {item.question && (
+                          <div className="ask-question" style={{ fontWeight: '600', color: '#e4e4e7', marginBottom: '6px' }}>Q: {item.question}</div>
+                        )}
+                        <div className="section-content" style={{ whiteSpace: 'pre-wrap' }}>{item.answer}</div>
                       </div>
-                    )}
-                  </>
+                    ))}
+                  </div>
                 )}
+
               </div>
             )}
 
@@ -716,12 +1134,66 @@ export default function App() {
                 </button>
               </div>
             )}
+
+            {/* Personal Problem Notes & Rating */}
+            {!coachLoading && !loading && (
+              <div className="info-section alt-section" style={{ marginTop: '14px', background: '#18181b', border: '1px solid #27272a', borderRadius: '8px', padding: '10px 12px' }}>
+                <div className="section-label alt-label" style={{ color: '#fbbf24', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span>📝 Personal Notes & Rating</span>
+                  {savingNotesStatus && <span style={{ fontSize: '10px', color: '#4ade80' }}>✓ Saved to CSV</span>}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: '#a1a1aa' }}>Difficulty Flag:</span>
+                  <select
+                    value={personalDifficultyInput}
+                    onChange={(e) => {
+                      setPersonalDifficultyInput(e.target.value);
+                      saveNotes(userNotesInput, e.target.value);
+                    }}
+                    style={{ flex: 1, background: '#09090b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    <option value="">Not Rated</option>
+                    <option value="Hard for me">🔥 Hard for me</option>
+                    <option value="Tricky Edge Cases">⚠️ Tricky Edge Cases</option>
+                    <option value="Medium">⚡ Medium</option>
+                    <option value="Easy">✅ Easy</option>
+                  </select>
+                </div>
+                <textarea
+                  className="ask-input"
+                  rows={2}
+                  placeholder="Add custom notes or comments for this problem (saved to CSV)..."
+                  value={userNotesInput}
+                  onChange={(e) => {
+                    setUserNotesInput(e.target.value);
+                    saveNotes(e.target.value, personalDifficultyInput);
+                  }}
+                  style={{ fontSize: '11px' }}
+                />
+              </div>
+            )}
           </div>
         )}
 
         {/* TAB 3: RECOMMENDATION */}
         {activeTab === 'recommendation' && (
           <div>
+            {/* Company Tag Filter (Tier 1.1) */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', background: '#141416', padding: '8px 12px', borderRadius: '8px', border: '1px solid #27272a' }}>
+              <span style={{ fontSize: '11px', color: '#a1a1aa' }}>🏢 Target Company:</span>
+              <select
+                value={selectedCompany}
+                onChange={(e) => {
+                  setSelectedCompany(e.target.value);
+                  fetchRecommendation(e.target.value);
+                }}
+                style={{ background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', padding: '4px 8px', fontSize: '12px', cursor: 'pointer' }}
+              >
+                <option value="">All Companies</option>
+                {companies.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
             {focusTopic && (
               <div className="rec-focus-note">
                 <span>🎯 Focus Topic: <strong>{focusTopic}</strong></span>
@@ -827,6 +1299,44 @@ export default function App() {
                 ? 'Syncing history…'
                 : 'Sync All LeetCode History'}
             </button>
+
+            {/* Weekly Journal Export (Tier 5.1) */}
+            <button
+              className="coach-btn secondary"
+              style={{ marginTop: '10px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              onClick={exportWeeklyJournal}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export Weekly Mistake Journal (.md)
+            </button>
+
+            {/* Solved Problems Spreadsheet Export (.csv) */}
+            <div className="info-section alt-section" style={{ marginTop: '12px', background: '#18181b', border: '1px solid #27272a', padding: '10px 12px', borderRadius: '8px' }}>
+              <div className="section-label alt-label" style={{ color: '#60a5fa', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '600' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                Export Solved Problems Spreadsheet (.csv)
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px', alignItems: 'center' }}>
+                <select
+                  value={csvTimeframe}
+                  onChange={(e) => setCsvTimeframe(e.target.value)}
+                  style={{ flex: 1, background: '#09090b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', padding: '6px 8px', fontSize: '11px', cursor: 'pointer' }}
+                >
+                  <option value="current_week">Current Week (Past 7 Days)</option>
+                  <option value="past_30_days">Past 30 Days</option>
+                  <option value="all_time">All Solved Problems</option>
+                </select>
+                <button
+                  className={`coach-btn ${exportingCsv ? 'loading' : ''}`}
+                  style={{ flex: 'none', padding: '6px 12px', fontSize: '11px' }}
+                  disabled={exportingCsv}
+                  onClick={exportSolvedCsv}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px', verticalAlign: 'middle'}}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  {exportingCsv ? 'Exporting…' : 'Download .csv'}
+                </button>
+              </div>
+            </div>
 
             {syncStatus && (
               <div className={`sync-card ${syncStatus.phase === 'error' ? 'sync-error' : ''}`}>

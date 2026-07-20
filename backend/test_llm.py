@@ -45,5 +45,42 @@ class Solution {
     assert diagnosis["root_cause_category"] in ["wrong_approach", "implementation_bug", "edge_case_miss", "complexity_issue", "unclear"]
     print("\nLive LLM diagnostics integration test passed!")
 
+
+def test_live_llm_progressive_hints():
+    from backend.agent import generate_levelled_hint
+    print("Testing live LLM progressive hints...")
+    buggy_code = """
+class Solution {
+    public int[] twoSum(int[] nums, int target) {
+        for (int i = 0; i < nums.length; i++) {
+            for (int j = i; j < nums.length; j++) {
+                if (nums[i] + nums[j] == target) {
+                    return new int[]{i, j};
+                }
+            }
+        }
+        return new int[]{};
+    }
+}
+"""
+    for level in [1, 2, 3]:
+        hint_res = generate_levelled_hint(
+            problem_title="Two Sum",
+            code=buggy_code,
+            language="java",
+            level=level
+        )
+        print(f"\n--- Level {level} progressive hint ---")
+        print(json.dumps(hint_res, indent=2))
+        assert hint_res["level"] == level
+        assert isinstance(hint_res["hint"], str) and len(hint_res["hint"]) > 0
+        if level < 3:
+            assert hint_res["has_next"] is True
+        else:
+            assert hint_res["has_next"] is False
+    print("\nLive LLM progressive hints integration test passed!")
+
+
 if __name__ == "__main__":
     test_live_llm_diagnosis()
+    test_live_llm_progressive_hints()

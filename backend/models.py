@@ -17,7 +17,10 @@ class Problem(Base):
     url = Column(String, nullable=False)
     difficulty = Column(String, nullable=False) # Easy, Medium, Hard
     topics = Column(String, nullable=False) # Comma-separated list of topics, e.g. "Arrays,Two Pointers"
+    companies = Column(String, nullable=True)  # Comma-separated company names, e.g. "Google,Amazon"
     is_solved = Column(Boolean, default=False, nullable=False) # True once synced from LeetCode history
+    user_notes = Column(Text, nullable=True)
+    personal_difficulty = Column(String, nullable=True) # e.g. "Hard for me", "Tricky Edge Cases", "Medium", "Easy"
 
     attempts = relationship("Attempt", back_populates="problem")
 
@@ -32,6 +35,8 @@ class Attempt(Base):
     root_cause_category = Column(String, nullable=True) # wrong_approach, implementation_bug, etc.
     explanation_text = Column(Text, nullable=True)
     time_taken_seconds = Column(Integer, nullable=True)
+    time_spent_seconds = Column(Integer, nullable=True)
+    hints_used = Column(Integer, default=0, nullable=False)  # progressive hint reveal count (Tier 3.1)
 
     problem = relationship("Problem", back_populates="attempts")
 
@@ -40,15 +45,34 @@ class TopicMastery(Base):
     __tablename__ = "topic_mastery"
 
     topic = Column(String, primary_key=True, index=True) # e.g., "Arrays", "Two Pointers"
-    mastery_score = Column(Float, default=0.0, nullable=False) # 0.0 to 1.0
+    rating = Column(Float, default=1200.0, nullable=False)
     attempts_count = Column(Integer, default=0, nullable=False)
-    success_rate = Column(Float, default=0.0, nullable=False)
-    last_attempted = Column(DateTime, nullable=True)
-    next_due_date = Column(DateTime, nullable=True)
+    success_count = Column(Integer, default=0, nullable=False)
+    last_updated = Column(DateTime, default=datetime.utcnow, nullable=False)
+    next_review_date = Column(DateTime, nullable=True)
+
+    @property
+    def mastery_score(self) -> float:
+        # Maps rating to 0.0 - 1.0 (800 -> 0.0, 1600 -> ~0.5, 2000+ -> ~1.0)
+        return max(0.0, min(1.0, (self.rating - 800) / 1200))
+
+    @property
+    def success_rate(self) -> float:
+        if self.attempts_count <= 0:
+            return 0.0
+        return self.success_count / self.attempts_count
+
+    @property
+    def last_attempted(self) -> Optional[datetime]:
+        return self.last_updated
+
+    @property
+    def next_due_date(self) -> Optional[datetime]:
+        return self.next_review_date
 
 
 class UserConfig(Base):
-    """Simple key/value store for user preferences (e.g. focus topic)."""
+    """Simple key/value store for user preferences (e.g. focus topic, critique estimates)."""
     __tablename__ = "user_config"
 
     key = Column(String, primary_key=True, index=True)
@@ -66,6 +90,31 @@ class SpacedRepetition(Base):
     problem = relationship("Problem")
 
 
+class DailyActivity(Base):
+    """Tracks per-day attempt/solve counts for streak calculation (Tier 1.4)."""
+    __tablename__ = "daily_activity"
+
+    date = Column(String, primary_key=True)  # ISO date string "YYYY-MM-DD"
+    problems_attempted = Column(Integer, default=0, nullable=False)
+    problems_solved = Column(Integer, default=0, nullable=False)
+
+
+class MockInterviewSession(Base):
+    """Records mock interview sessions including approach gating and timing (Tier 4.1)."""
+    __tablename__ = "mock_interview_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    problem_id = Column(String, ForeignKey("problems.id"), nullable=False)
+    start_time = Column(DateTime, default=datetime.utcnow, nullable=False)
+    time_limit_seconds = Column(Integer, default=2700, nullable=False)  # 45 min default
+    company = Column(String, nullable=True)
+    approach_submitted_at = Column(DateTime, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    time_taken_seconds = Column(Integer, nullable=True)
+
+    problem = relationship("Problem")
+
+
 # ==========================================================
 # Pydantic Schemas
 # ==========================================
@@ -76,6 +125,13 @@ class ProblemBase(BaseModel):
     url: str
     difficulty: str
     topics: str
+    companies: Optional[str] = None
+    user_notes: Optional[str] = None
+    personal_difficulty: Optional[str] = None
+
+class SaveProblemNotesRequest(BaseModel):
+    user_notes: Optional[str] = None
+    personal_difficulty: Optional[str] = None
 
 class ProblemSchema(ProblemBase):
     class Config:
@@ -87,6 +143,7 @@ class AttemptBase(BaseModel):
     root_cause_category: Optional[str] = None
     explanation_text: Optional[str] = None
     time_taken_seconds: Optional[int] = None
+    hints_used: int = 0
 
 class AttemptCreate(AttemptBase):
     pass
@@ -103,6 +160,7 @@ class TopicMasterySchema(BaseModel):
     mastery_score: float
     attempts_count: int
     success_rate: float
+    rating: float
     last_attempted: Optional[datetime] = None
     next_due_date: Optional[datetime] = None
 
@@ -118,6 +176,7 @@ class SubmissionAnalyzeRequest(BaseModel):
     error_details: Optional[str] = None
     test_cases: Optional[List[dict]] = None
     time_taken_seconds: Optional[int] = None
+    hints_used: int = 0  # passed from extension after progressive hint use
 
 class SubmissionAnalyzeResponse(BaseModel):
     root_cause_category: str
@@ -151,6 +210,7 @@ class SolvedProblemSyncSchema(BaseModel):
     title: str
     difficulty: str
     topics: List[str]
+    company: Optional[str] = None  # 1.1: optional company tag from sync source
 
 
 class SyncSolvedRequest(BaseModel):
@@ -194,6 +254,8 @@ class CheckApproachResponse(BaseModel):
     alternative_approach: str
 
 
+# --- Levelled hint schemas (Tier 3.1) ---
+
 class GetHintRequest(BaseModel):
     problem_id: str
     problem_title: str
@@ -206,10 +268,19 @@ class GetHintResponse(BaseModel):
     hint: str
 
 
-class EdgeCaseItem(BaseModel):
-    case: str
-    handled: bool
-    suggestion: str
+class HintRevealRequest(BaseModel):
+    problem_id: str
+    problem_title: str
+    code: str
+    language: str
+    level: int  # 1, 2, or 3
+    constraints: Optional[List[str]] = None
+
+
+class HintRevealResponse(BaseModel):
+    hint: str
+    level: int
+    has_next: bool  # False when level == 3
 
 
 class GetEdgeCasesRequest(BaseModel):
@@ -221,7 +292,7 @@ class GetEdgeCasesRequest(BaseModel):
 
 
 class GetEdgeCasesResponse(BaseModel):
-    edge_cases: List[EdgeCaseItem]
+    edge_cases: List[dict]
     constraints_critique: str
 
 
@@ -237,3 +308,99 @@ class AskHelpRequest(BaseModel):
 class AskHelpResponse(BaseModel):
     answer: str
 
+
+# --- Explain-back schemas (Tier 3.2) ---
+
+class ExplainBackRequest(BaseModel):
+    problem_id: str
+    code: str
+    language: str
+    user_explanation: str
+
+
+class ExplainBackResponse(BaseModel):
+    matches: bool
+    discrepancy_note: Optional[str] = None
+
+
+# --- Complexity self-estimate schemas (Tier 3.3) ---
+
+class ComplexityEstimateRequest(BaseModel):
+    problem_id: str
+    time_complexity: str   # e.g. "O(N log N)"
+    space_complexity: str  # e.g. "O(1)"
+
+
+class ComplexityRevealRequest(BaseModel):
+    problem_id: str
+    problem_title: str
+    code: str
+    language: str
+    constraints: Optional[List[str]] = None
+
+
+class ComplexityRevealResponse(BaseModel):
+    estimate: Optional[dict]  # stored guess: {time_complexity, space_complexity}
+    is_optimal: bool
+    current_complexity: str
+    optimal_complexity: str
+    feedback: str
+    alternative_approach: str
+
+
+# --- Activity / streak schemas (Tier 1.4) ---
+
+class StreakResponse(BaseModel):
+    current_streak_days: int
+    problems_today: int
+    solved_today: int
+
+
+# --- Weekly journal schema (Tier 5.1) ---
+
+class WeeklyJournalResponse(BaseModel):
+    period_start: str
+    period_end: str
+    total_attempts: int
+    total_solved: int
+    by_category: dict          # { category: count }
+    example_problems: List[str]
+    markdown_text: str
+
+
+# --- Mock interview schemas (Tier 4.1) ---
+
+class MockStartRequest(BaseModel):
+    company: Optional[str] = None
+    time_limit_seconds: int = 2700  # 45 min default
+
+
+class MockStartResponse(BaseModel):
+    session_id: int
+    problem_id: str
+    problem_title: str
+    problem_url: str
+    difficulty: str
+    topics: str
+    time_limit_seconds: int
+
+
+class MockApproachRequest(BaseModel):
+    session_id: int
+    approach_text: str
+
+
+class MockSubmitRequest(BaseModel):
+    session_id: int
+    problem_id: str
+    problem_title: str
+    code: str
+    language: str
+
+
+# --- Weak pairs (Tier 2.1) ---
+
+class WeakPairItem(BaseModel):
+    topic_a: str
+    topic_b: str
+    co_occurrence: int

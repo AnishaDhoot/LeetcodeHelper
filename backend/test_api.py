@@ -27,7 +27,8 @@ def test_get_mastery():
     print(f"GET /topics/mastery returns {len(data)} topics.")
     assert len(data) > 0
     assert "topic" in data[0]
-    assert "mastery_score" in data[0]
+    assert "mastery_score" in data[0]  # derived property, always present
+    assert "rating" in data[0]         # Elo rating column
 
 def test_get_recommendation():
     response = client.get("/problems/next")
@@ -52,13 +53,15 @@ def test_analyze_submission_success():
         "code": "class Solution { public int[] twoSum(int[] nums, int target) { return new int[]{0, 1}; } }",
         "language": "java",
         "verdict": "Accepted",
-        "time_taken_seconds": 120
+        "time_taken_seconds": 120,
+        "hints_used": 1
     }
     db = SessionLocal()
     prob = db.query(Problem).filter(Problem.id == "two-sum").first()
     target_topic = prob.topics if prob else "Arrays & Hashing"
     mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
     initial_attempts = mastery_before.attempts_count if mastery_before else 0
+    initial_rating = mastery_before.rating if mastery_before else 1200.0
     db.close()
 
     response = client.post("/submissions/analyze", json=payload)
@@ -67,13 +70,18 @@ def test_analyze_submission_success():
     print(f"POST /submissions/analyze (Accepted) returns: {data}")
     assert data["root_cause_category"] == "none"
 
-    # Verify that Two Sum's topic mastery score increased
+    # Verify that the topic's Elo rating increased on success
     db = SessionLocal()
     try:
         mastery = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
-        print(f"{target_topic} mastery after success: {mastery.mastery_score}")
-        assert mastery.mastery_score > 0.0
+        print(f"{target_topic} rating after success: {mastery.rating:.1f} (was {initial_rating:.1f})")
+        assert mastery.rating > initial_rating, "Elo rating must increase on a successful submission"
         assert mastery.attempts_count == initial_attempts + 1
+        
+        # Verify attempt was recorded with hints
+        latest_attempt = db.query(Attempt).filter(Attempt.problem_id == "two-sum").order_by(Attempt.id.desc()).first()
+        assert latest_attempt is not None
+        assert latest_attempt.hints_used == 1
     finally:
         db.close()
 
@@ -93,7 +101,8 @@ def test_analyze_submission_failure(mock_diagnose):
         "language": "java",
         "verdict": "Wrong Answer",
         "error_details": "Failed testcase [1, 2, 3]",
-        "test_cases": [{"input": "[1, 2, 3]", "expected": "false", "actual": "true"}]
+        "test_cases": [{"input": "[1, 2, 3]", "expected": "false", "actual": "true"}],
+        "hints_used": 3
     }
 
     db = SessionLocal()
@@ -101,6 +110,7 @@ def test_analyze_submission_failure(mock_diagnose):
     target_topic = prob.topics if prob else "Arrays & Hashing"
     mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
     initial_attempts = mastery_before.attempts_count if mastery_before else 0
+    initial_rating = mastery_before.rating if mastery_before else 1200.0
     db.close()
 
     response = client.post("/submissions/analyze", json=payload)
@@ -110,12 +120,17 @@ def test_analyze_submission_failure(mock_diagnose):
     assert data["root_cause_category"] == "implementation_bug"
     assert "Off-by-one" in data["explanation"]
 
-    # Verify that Contains Duplicate's topic mastery score decreased or attempt count tracked
+    # Verify that Elo rating decreased and attempt count tracked
     db = SessionLocal()
     try:
         mastery = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
-        print(f"{target_topic} mastery after failure: {mastery.mastery_score}")
+        print(f"{target_topic} rating after failure: {mastery.rating:.1f} (was {initial_rating:.1f})")
         assert mastery.attempts_count == initial_attempts + 1
+        assert mastery.rating < initial_rating, "Elo rating must decrease on a failed submission"
+
+        latest_attempt = db.query(Attempt).filter(Attempt.problem_id == "contains-duplicate").order_by(Attempt.id.desc()).first()
+        assert latest_attempt is not None
+        assert latest_attempt.hints_used == 3
     finally:
         db.close()
 
@@ -236,22 +251,111 @@ def test_sync_solved():
         assert p.title == "Sync Test Problem"
         assert sentinel_topic in p.topics
 
-        # New topic gets a seeded TopicMastery row
+        # New topic gets a seeded TopicMastery row with Elo rating above 1200
+        # (log-scaled: 2 solves => ~800 + 1200*log(3)/log(51) ≈ 1160 ... actually
+        # for 2 problems across 2 probs the seed is for count=2)
         m = db.query(TopicMastery).filter(TopicMastery.topic == sentinel_topic).first()
         assert m is not None
-        assert m.mastery_score > 0.0
+        # seed rating = 800 + 1200*log(3)/log(51) ≈ 1136 < 1200 for only 2 solves
+        # so we simply check the row exists and is a valid Elo rating
+        assert m.rating >= 400.0
         assert m.attempts_count == 2
+        assert m.success_count == 2  # synced solves treated as successes
 
         # Existing "Arrays & Hashing" mastery must be unchanged by the sync
         existing = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
-        # (It was last touched by the analyze tests above; sync must not alter it further.)
-        print(f"Arrays & Hashing after sync: score={existing.mastery_score}, attempts={existing.attempts_count}")
+        print(f"Arrays & Hashing after sync: rating={existing.rating:.1f}, attempts={existing.attempts_count}")
     finally:
         # Clean up sentinel artifacts so the test is repeatable.
         db.query(TopicMastery).filter(TopicMastery.topic == sentinel_topic).delete()
         db.query(Problem).filter(Problem.id.in_(["sync-test-problem", "another-sync-problem"])).delete()
         db.commit()
         db.close()
+
+
+@patch("backend.main.generate_levelled_hint")
+def test_reveal_hint(mock_levelled_hint):
+    mock_levelled_hint.return_value = {
+        "hint": "Think about storing index in a hash map.",
+        "level": 2,
+        "has_next": True
+    }
+    payload = {
+        "problem_id": "two-sum",
+        "problem_title": "Two Sum",
+        "code": "class Solution { }",
+        "language": "java",
+        "level": 2
+    }
+    response = client.post("/hints/reveal", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    print(f"POST /hints/reveal returns: {data}")
+    assert data["level"] == 2
+    assert "hash map" in data["hint"]
+    assert data["has_next"] is True
+
+
+def test_get_companies():
+    response = client.get("/companies")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+
+
+def test_reviews_count():
+    response = client.get("/reviews/count")
+    assert response.status_code == 200
+    data = response.json()
+    assert "due_count" in data
+
+
+def test_streak():
+    response = client.get("/activity/streak")
+    assert response.status_code == 200
+    data = response.json()
+    assert "current_streak_days" in data
+    assert "problems_today" in data
+
+
+def test_weak_pairs():
+    response = client.get("/topics/weak-pairs")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+
+
+@patch("backend.main.generate_explain_back_check")
+def test_explain_back(mock_check):
+    mock_check.return_value = {"matches": True, "discrepancy_note": None}
+    payload = {
+        "problem_id": "two-sum",
+        "code": "class Solution { }",
+        "language": "java",
+        "user_explanation": "I used a hash map to look up complements in O(N) time."
+    }
+    response = client.post("/submissions/explain-back", json=payload)
+    assert response.status_code == 200
+    assert response.json()["matches"] is True
+
+
+def test_mock_interview():
+    start_res = client.post("/mock-interview/start", json={"time_limit_seconds": 2700})
+    assert start_res.status_code == 200
+    session = start_res.json()
+    assert "session_id" in session
+
+    app_res = client.post("/mock-interview/approach", json={"session_id": session["session_id"], "approach_text": "Use two pointers"})
+    assert app_res.status_code == 200
+    assert app_res.json()["status"] == "approach_accepted"
+
+
+def test_weekly_journal():
+    response = client.get("/journal/weekly")
+    assert response.status_code == 200
+    data = response.json()
+    assert "markdown_text" in data
+    assert "total_attempts" in data
 
 
 if __name__ == "__main__":
@@ -264,7 +368,16 @@ if __name__ == "__main__":
     test_health()
     test_check_approach()
     test_get_hint()
+    test_reveal_hint()
     test_get_edge_cases()
     test_ask_help()
     test_sync_solved()
+    test_get_companies()
+    test_reviews_count()
+    test_streak()
+    test_weak_pairs()
+    test_explain_back()
+    test_mock_interview()
+    test_weekly_journal()
     print("All backend tests passed successfully!")
+

@@ -118,6 +118,34 @@ async function fetchSolvedProblemsViaTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Tier 1.2 — Due review alarm & badge updater
+// ---------------------------------------------------------------------------
+async function updateReviewBadge() {
+  try {
+    const data = await backendFetch("/reviews/count");
+    const dueCount = data.due_count || 0;
+    if (dueCount > 0) {
+      chrome.action.setBadgeText({ text: String(dueCount) });
+      chrome.action.setBadgeBackgroundColor({ color: "#ef4444" }); // urgent red badge
+    } else {
+      chrome.action.setBadgeText({ text: "" });
+    }
+  } catch (err) {
+    console.log("[DSA Tutor Background] Failed to fetch review count for badge:", err);
+  }
+}
+
+// Set up alarm every 15 mins
+chrome.alarms.create("check_reviews_due", { periodInMinutes: 15 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "check_reviews_due") {
+    updateReviewBadge();
+  }
+});
+// Initial check on startup
+updateReviewBadge();
+
+// ---------------------------------------------------------------------------
 // Message router
 // ---------------------------------------------------------------------------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -139,7 +167,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "get_recommendation") {
-    backendFetch("/problems/next")
+    const company = request.payload?.company ? `?company=${encodeURIComponent(request.payload.company)}` : "";
+    backendFetch(`/problems/next${company}`)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_companies") {
+    backendFetch("/companies")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_reviews_count") {
+    backendFetch("/reviews/count")
+      .then((data) => {
+        updateReviewBadge();
+        sendResponse({ success: true, data });
+      })
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_streak") {
+    backendFetch("/activity/streak")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_weak_pairs") {
+    backendFetch("/topics/weak-pairs")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_time_trend") {
+    const topic = request.payload?.topic || "";
+    backendFetch(`/topics/time-trend?topic=${encodeURIComponent(topic)}`)
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -156,6 +224,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Code Coach actions ---
   if (request.action === "check_approach") {
     backendFetch("/approach/check", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "critique_estimate") {
+    backendFetch("/critique/estimate", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "critique_reveal") {
+    backendFetch("/critique/reveal", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "explain_back") {
+    backendFetch("/submissions/explain-back", { method: "POST", body: request.payload })
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
@@ -203,6 +292,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // --- Mock Interview actions ---
+  if (request.action === "mock_start") {
+    backendFetch("/mock-interview/start", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_approach") {
+    backendFetch("/mock-interview/approach", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_submit") {
+    backendFetch("/mock-interview/submit", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Journal export action ---
+  if (request.action === "get_weekly_journal") {
+    backendFetch("/journal/weekly")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // --- LeetCode history fetch (injects into LeetCode tab for same-origin access) ---
   if (request.action === "fetch_leetcode_history") {
     fetchSolvedProblemsViaTab()
@@ -233,4 +352,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
+
+  if (request.action === "export_solved_csv") {
+    const timeframe = request.payload?.timeframe || "current_week";
+    fetch(`${BACKEND_URL}/export/solved-csv?timeframe=${encodeURIComponent(timeframe)}`)
+      .then((res) => res.text())
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_problem_details") {
+    const problemId = request.payload?.problem_id;
+    backendFetch(`/problems/${encodeURIComponent(problemId)}`)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "save_problem_notes") {
+    const problemId = request.payload?.problem_id;
+    backendFetch(`/problems/${encodeURIComponent(problemId)}/notes`, { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
+
+
