@@ -21,7 +21,7 @@ def get_groq_model() -> str:
     return os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 def get_ollama_model() -> str:
-    return os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+    return os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
 def query_ollama(prompt: str, system_prompt: str) -> str:
     """Queries the local Ollama instance."""
@@ -54,7 +54,7 @@ def query_groq(prompt: str, system_prompt: str) -> str:
             ],
             model=get_groq_model(),
             temperature=0.2,
-            max_tokens=350,
+            max_tokens=1024,
             response_format={"type": "json_object"}
         )
         return chat_completion.choices[0].message.content
@@ -64,11 +64,16 @@ def query_groq(prompt: str, system_prompt: str) -> str:
 
 def clean_json_string(response_text: str) -> str:
     """Cleans code blocks or other wrapper text around JSON from the response."""
+    text = response_text.strip()
+    # Remove markdown code block syntax if present
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
     # Find JSON structure in the text
-    match = re.search(r"\{.*\}", response_text, re.DOTALL)
+    match = re.search(r"\{[\s\S]*\}", text)
     if match:
         return match.group(0)
-    return response_text
+    return text
 
 def generate_diagnosis(
     problem_title: str,

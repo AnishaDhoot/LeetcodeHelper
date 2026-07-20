@@ -10,9 +10,19 @@ window.addEventListener("message", (event) => {
       const models = window.monaco?.editor?.getModels();
       let code = "";
       if (models && models.length > 0) {
-        // Find the main editor model (usually the first one or the one with content)
-        // For LeetCode, getModels()[0] is standard.
-        code = models[0].getValue();
+        // Select the model with the largest code payload that isn't a testcase input
+        let bestModel = models[0];
+        let maxLen = bestModel.getValue() ? bestModel.getValue().length : 0;
+        for (let i = 1; i < models.length; i++) {
+          const m = models[i];
+          const val = m.getValue() || "";
+          const uriStr = m.uri ? m.uri.toString() : "";
+          if (!uriStr.includes("input") && !uriStr.includes("testcase") && val.length > maxLen) {
+            maxLen = val.length;
+            bestModel = m;
+          }
+        }
+        code = bestModel.getValue();
       } else {
         console.warn("[DSA Tutor Injected] No Monaco models found.");
       }

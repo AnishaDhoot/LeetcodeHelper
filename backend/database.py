@@ -1,8 +1,9 @@
+from pathlib import Path
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = "sqlite:///./dsa_tutor.db"
+DB_PATH = Path(__file__).resolve().parent.parent / "dsa_tutor.db"
+DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
     DATABASE_URL, connect_args={"check_same_thread": False}

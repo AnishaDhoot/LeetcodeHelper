@@ -208,8 +208,12 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
 
     is_success = (req.verdict.lower() in ["accepted", "success"])
 
-    # 2. Update topic mastery & daily streak activity
-    update_mastery_on_submission(db, problem.topics, is_success=is_success, difficulty=problem.difficulty)
+    # 2. Update topic mastery & daily streak activity for each individual topic
+    topic_list = [t.strip() for t in (problem.topics or "Arrays & Hashing").split(",") if t.strip()]
+    if not topic_list:
+        topic_list = ["Arrays & Hashing"]
+    for t in topic_list:
+        update_mastery_on_submission(db, t, is_success=is_success, difficulty=problem.difficulty)
     _record_daily_activity(db, is_success=is_success)
 
     # 3. Handle success vs failure
@@ -272,7 +276,9 @@ def record_success(problem_id: str, topic: str, time_taken_seconds: Optional[int
     if not problem:
         raise HTTPException(status_code=404, detail="Problem not found in database. Analyze first.")
         
-    update_mastery_on_submission(db, problem.topics, is_success=True, difficulty=problem.difficulty)
+    topics_to_update = [t.strip() for t in (topic or problem.topics or "Arrays & Hashing").split(",") if t.strip()]
+    for t in topics_to_update:
+        update_mastery_on_submission(db, t, is_success=True, difficulty=problem.difficulty)
     
     attempt = Attempt(
         problem_id=problem.id,

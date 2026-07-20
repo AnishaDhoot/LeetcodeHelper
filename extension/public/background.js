@@ -69,10 +69,9 @@ async function fetchSolvedProblemsViaTab() {
 
       if (solved.length === 0) return { ok: true, problems: [] };
 
-      // ── Step 2: Fetch topic tags concurrently (20 at a time) ────────────
-      // We run batches of 20 concurrent GraphQL requests so topic data is
-      // collected quickly without hammering LeetCode's rate limits.
-      const BATCH = 20;
+      // ── Step 2: Fetch topic tags concurrently with rate-limiting ────────────
+      // Batches of 5 concurrent requests with a brief delay between batches to avoid 429 rate limits.
+      const BATCH = 5;
       const problems = [];
 
       for (let i = 0; i < solved.length; i += BATCH) {
@@ -102,6 +101,9 @@ async function fetchSolvedProblemsViaTab() {
           })
         );
         settled.forEach(r => r.status === "fulfilled" && problems.push(r.value));
+        if (i + BATCH < solved.length) {
+          await new Promise((res) => setTimeout(res, 80));
+        }
       }
 
       return { ok: true, problems };

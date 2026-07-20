@@ -58,7 +58,7 @@ def test_analyze_submission_success():
     }
     db = SessionLocal()
     prob = db.query(Problem).filter(Problem.id == "two-sum").first()
-    target_topic = prob.topics if prob else "Arrays & Hashing"
+    target_topic = [t.strip() for t in prob.topics.split(",") if t.strip()][0] if prob and prob.topics else "Arrays & Hashing"
     mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
     initial_attempts = mastery_before.attempts_count if mastery_before else 0
     initial_rating = mastery_before.rating if mastery_before else 1200.0
@@ -107,7 +107,7 @@ def test_analyze_submission_failure(mock_diagnose):
 
     db = SessionLocal()
     prob = db.query(Problem).filter(Problem.id == "contains-duplicate").first()
-    target_topic = prob.topics if prob else "Arrays & Hashing"
+    target_topic = [t.strip() for t in prob.topics.split(",") if t.strip()][0] if prob and prob.topics else "Arrays & Hashing"
     mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
     initial_attempts = mastery_before.attempts_count if mastery_before else 0
     initial_rating = mastery_before.rating if mastery_before else 1200.0
