@@ -152,10 +152,11 @@ def update_spaced_repetition(db: Session, problem_id: str) -> SpacedRepetition:
 
     Stages
     ------
-    1 → review in  3 days
-    2 → review in  7 days
-    3 → review in 14 days
-    4 → completed, far-future date
+    1 → review in  3 days (Short term)
+    2 → review in  7 days (1 week)
+    3 → review in 14 days (2 weeks)
+    4 → review in 30 days (1 month review)
+    5 → completed / mastered, far-future date
     """
     now = datetime.utcnow()
     sr = db.query(SpacedRepetition).filter(SpacedRepetition.problem_id == problem_id).first()
@@ -175,9 +176,12 @@ def update_spaced_repetition(db: Session, problem_id: str) -> SpacedRepetition:
         elif sr.stage == 2:
             sr.stage = 3
             sr.next_due = now + timedelta(days=14)
-        elif sr.stage >= 3:
+        elif sr.stage == 3:
             sr.stage = 4
-            sr.next_due = now + timedelta(days=3650)  # effectively "done"
+            sr.next_due = now + timedelta(days=30)  # Monthly review!
+        elif sr.stage >= 4:
+            sr.stage = 5
+            sr.next_due = now + timedelta(days=3650)  # effectively "done / mastered"
         sr.last_solved = now
 
     db.commit()
@@ -291,7 +295,7 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
     # 1. Gather active spaced-repetition reviews that are due
     reviews_due = db.query(SpacedRepetition).filter(
         SpacedRepetition.next_due <= now,
-        SpacedRepetition.stage < 4,
+        SpacedRepetition.stage < 5,
     ).all()
 
     reviews = []

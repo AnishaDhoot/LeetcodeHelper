@@ -439,6 +439,17 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             )
             db.add(problem)
 
+        # Seed initial spaced repetition schedule for synced solved problem
+        sr = db.query(SpacedRepetition).filter(SpacedRepetition.problem_id == prob.problem_id).first()
+        if not sr:
+            sr = SpacedRepetition(
+                problem_id=prob.problem_id,
+                stage=1,
+                last_solved=datetime.utcnow(),
+                next_due=datetime.utcnow() + timedelta(days=3)
+            )
+            db.add(sr)
+
     # 2. Seed per-topic mastery from solved counts (never clobber live data).
     new_topics = 0
     seeded_topics = 0
@@ -567,7 +578,7 @@ def get_reviews_count(db: Session = Depends(get_db)):
     now = datetime.utcnow()
     due_count = db.query(SpacedRepetition).filter(
         SpacedRepetition.next_due <= now,
-        SpacedRepetition.stage < 4
+        SpacedRepetition.stage < 5
     ).count()
     return {"due_count": due_count}
 
@@ -890,9 +901,15 @@ def export_solved_csv(timeframe: str = "current_week", db: Session = Depends(get
         sr = sr_records.get(p.id)
         if sr:
             next_due_str = sr.next_due.strftime("%Y-%m-%d")
-            stage_map = {1: "Stage 1 (3 days)", 2: "Stage 2 (7 days)", 3: "Stage 3 (14 days)", 4: "Mastered / Complete"}
+            stage_map = {
+                1: "Stage 1 (3 days)",
+                2: "Stage 2 (7 days)",
+                3: "Stage 3 (14 days)",
+                4: "Stage 4 (30 days / Monthly Review)",
+                5: "Mastered / Complete"
+            }
             schedule_str = stage_map.get(sr.stage, f"Stage {sr.stage}")
-            if sr.stage >= 4:
+            if sr.stage >= 5:
                 status_str = "Mastered"
             elif sr.next_due <= now:
                 status_str = "DUE TODAY / OVERDUE"
