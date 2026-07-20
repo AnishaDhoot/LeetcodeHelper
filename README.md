@@ -1,12 +1,12 @@
-# 🧠 DSA Tutor Agent — Autonomous LeetCode Companion
+# DSA Helper — Autonomous LeetCode Companion
 
 > An intelligent, autonomous Data Structures & Algorithms (DSA) tutor overlay for LeetCode. Features conceptual failure diagnostics, Elo-based topic mastery scoring, progressive hint revealing, timed mock interviews, spaced repetition reviews, and real-time interactive Code Coaching.
 
 ---
 
-## 🌟 Key Features
+##  Key Features
 
-### 🎯 1. Conceptual Failure Diagnostics (AI Agent Layer)
+### 1. Conceptual Failure Diagnostics (AI Agent Layer)
 - **Automatic Submission Interception**: Listens to LeetCode submission verdicts in real time (Wrong Answer, Time Limit Exceeded, Runtime Error, Compile Error).
 - **LLM Root-Cause Classification**: Automatically classifies failures into exact conceptual categories:
   - `wrong_approach`: Fundamental algorithmic flaw (e.g. using Greedy instead of Dynamic Programming).
@@ -15,17 +15,17 @@
   - `complexity_issue`: Solution is correct but exceeds time/space limits (TLE / OOM).
 - **Actionable Guidance**: Provides plain-language explanations of *why* the logic fails without spoiling the exact code solution.
 
-### 🧠 2. Elo-Based Topic Mastery & Adaptive Recommender
+### 2. Elo-Based Topic Mastery & Adaptive Recommender
 - **Dynamic Skill Scoring**: Employs an Elo rating algorithm ($R_{\text{new}} = R_{\text{old}} + K \times (S - E)$) per topic (Arrays, Two Pointers, Dynamic Programming, Graphs, etc.).
 - **Productive Struggle Band**: Recommends problem difficulties (Easy $\rightarrow$ Medium $\rightarrow$ Hard) matched precisely to your current Elo rating in that specific topic.
 - **Difficulty Ramp for New Topics**: Restricts new topics to Easy problems until fundamental confidence is built.
 - **Epsilon-Greedy Exploration**: Periodically introduces exploratory problems outside your weak zone to ensure broad skill coverage.
 
-### 📅 3. Spaced Repetition Review Engine
+### 3. Spaced Repetition Review Engine
 - **Automated Scheduling**: Schedules review dates based on performance (Stage 1: 3 days, Stage 2: 7 days, Stage 3: 14 days, Stage 4: Mastered).
 - **Badge Notifications**: Automatically alerts you via the extension icon badge when review items are due today.
 
-### 🚀 4. Interactive Code Coach
+### 4. Interactive Code Coach
 - **Approach Critique**: Analyzes your code efficiency before submission and suggests optimal alternatives.
 - **3-Stage Levelled Hints**:
   - **Level 1**: Core Concept & Invariant Insight
@@ -35,18 +35,18 @@
 - **Explain-Back Verification**: Analyzes your plain-English explanation against your code implementation to ensure true conceptual comprehension.
 - **Complexity Self-Estimate**: Predicts time/space complexities and compares them against AI benchmark analysis.
 
-### 🎙️ 5. Timed Mock Interview Mode
+### 5. Timed Mock Interview Mode
 - **Approach Gating**: Enforces real interview flow by locking the code editor until you submit your initial verbal strategy.
 - **Company Filtering**: Selects real interview questions tagged by major tech companies (Google, Meta, Amazon, etc.).
 - **Live Session Timer**: Tracks remaining time and logs session analytics upon completion.
 
-### 📊 6. Analytics & Export Tools
+### 6. Analytics & Export Tools
 - **Weekly Mistake Journal**: Generates a Markdown digest summarizing your past week's attempts, error categories, and review candidates.
 - **Detailed Solved CSV Export**: Exports comprehensive spreadsheets with problem details, review dates, attempt counts, and custom personal notes.
 
 ---
 
-## 🛠️ Architecture & Tech Stack
+## Architecture & Tech Stack
 
 ```
    ┌────────────────────────────────────────────────────────┐
@@ -80,7 +80,7 @@
 
 ---
 
-## 🚀 Getting Started & Local Setup
+## Getting Started & Local Setup
 
 ### 1. Prerequisites
 - **Python**: 3.10+ (Python 3.12 recommended)
@@ -132,7 +132,3 @@ python -m pytest backend/test_api.py
 python -m pytest backend/test_llm.py
 ```
 
----
-
-## 📄 License
-MIT License © 2026 Anisha Dhoot
