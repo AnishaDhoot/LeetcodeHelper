@@ -1564,7 +1564,7 @@ export default function App() {
                 </select>
                 <button
                   className={`coach-btn ${exportingCsv ? 'loading' : ''}`}
-                  style={{ flex: 'none', padding: '6px 12px', fontSize: '11px' }}
+                  style={{ flex: 'none', width: 'auto', padding: '6px 12px', fontSize: '11px' }}
                   disabled={exportingCsv}
                   onClick={exportSolvedCsv}
                 >
