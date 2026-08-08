@@ -86,6 +86,7 @@ export default function App() {
         const remaining = res.data.time_limit_seconds - res.data.elapsed_seconds;
         setMockTimerSeconds(remaining > 0 ? remaining : 0);
         setIsMockMode(true);
+        setActiveTab('mastery');
         if (!res.data.approach_submitted && window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
         }
@@ -228,6 +229,7 @@ export default function App() {
         setMockApproachSubmitted(false);
         setMockTimerSeconds(res.data.time_limit_seconds || 2700);
         setIsMockMode(true);
+        setActiveTab('mastery');
         if (window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
         }
@@ -709,16 +711,18 @@ export default function App() {
             </svg>
             Mastery
           </button>
-          <button
-            className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
-            onClick={() => setActiveTab('coach')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
-              <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
-            </svg>
-            Coach
-          </button>
+          {!isMockMode && (
+            <button
+              className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
+              onClick={() => setActiveTab('coach')}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
+                <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
+              </svg>
+              Coach
+            </button>
+          )}
           <button
             className={`tab-btn ${activeTab === 'recommendation' ? 'active' : ''}`}
             onClick={() => setActiveTab('recommendation')}

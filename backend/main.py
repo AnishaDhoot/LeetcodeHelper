@@ -202,12 +202,23 @@ def _record_daily_activity(db: Session, is_success: bool):
 
 
 def check_active_test_lock(db: Session):
+    # 1. Check Badge Test lock
     active = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     if active:
         raise HTTPException(
             status_code=403,
             detail="Hints and AI assistance are locked during an active Badge Test."
         )
+
+    # 2. Check Mock Interview lock
+    mock = db.query(MockInterviewSession).filter(MockInterviewSession.submitted_at.is_(None)).order_by(MockInterviewSession.id.desc()).first()
+    if mock:
+        elapsed = (get_utc_now() - mock.start_time).total_seconds()
+        if elapsed <= mock.time_limit_seconds:
+            raise HTTPException(
+                status_code=403,
+                detail="Hints and AI assistance are locked during an active Mock Interview."
+            )
 
 
 def check_and_increment_ai_quota(db: Session, increment: bool = True):
