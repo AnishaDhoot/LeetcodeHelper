@@ -1,6 +1,32 @@
 // This script runs in the page context of leetcode.com
 // It can access window.monaco to get the current code in the editor.
 
+window.__dsaTutorReadOnly = false;
+
+// Poll and subscribe to new Monaco editors to lock them automatically
+const initMonacoListeners = () => {
+  if (window.monaco && window.monaco.editor) {
+    // Intercept future editor creations
+    window.monaco.editor.onDidCreateEditor((editor) => {
+      editor.updateOptions({ readOnly: !!window.__dsaTutorReadOnly });
+    });
+    // Apply to any already instantiated editors
+    const editors = window.monaco.editor.getEditors();
+    if (editors && editors.length > 0) {
+      editors.forEach(ed => {
+        ed.updateOptions({ readOnly: !!window.__dsaTutorReadOnly });
+      });
+    }
+  }
+};
+
+const pollInterval = setInterval(() => {
+  if (window.monaco && window.monaco.editor) {
+    initMonacoListeners();
+    clearInterval(pollInterval);
+  }
+}, 200);
+
 window.addEventListener("message", (event) => {
   // Only accept messages from ourselves
   if (event.source !== window) return;
@@ -45,9 +71,12 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "SET_READ_ONLY") {
     try {
+      window.__dsaTutorReadOnly = !!event.data.readOnly;
       const editors = window.monaco?.editor?.getEditors();
       if (editors && editors.length > 0) {
-        editors[0].updateOptions({ readOnly: !!event.data.readOnly });
+        editors.forEach(editor => {
+          editor.updateOptions({ readOnly: !!event.data.readOnly });
+        });
       }
     } catch (e) {
       console.error("[DSA Tutor Injected] Error setting readOnly:", e);
