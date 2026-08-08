@@ -343,16 +343,31 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
             suggested_action="View the recommendation tab for your next challenge!"
         )
 
-    # For failures, run the LLM diagnosis
-    check_and_increment_ai_quota(db)
-    diagnosis = generate_diagnosis(
-        problem_title=problem.title,
-        code=req.code,
-        language=req.language,
-        verdict=req.verdict,
-        error_details=req.error_details,
-        test_cases=req.test_cases
-    )
+    # For failures, run the LLM diagnosis if within quota
+    has_quota = True
+    try:
+        check_and_increment_ai_quota(db, increment=True)
+    except HTTPException as e:
+        if e.status_code == 429:
+            has_quota = False
+        else:
+            raise e
+
+    if has_quota:
+        diagnosis = generate_diagnosis(
+            problem_title=problem.title,
+            code=req.code,
+            language=req.language,
+            verdict=req.verdict,
+            error_details=req.error_details,
+            test_cases=req.test_cases
+        )
+    else:
+        diagnosis = {
+            "root_cause_category": "quota_exceeded",
+            "explanation": "Daily AI request limit reached. Failure diagnostics are locked until tomorrow.",
+            "suggested_action": "Keep practicing! You can still submit attempts, but AI diagnosis is currently disabled."
+        }
 
     # Save failed attempt
     attempt = Attempt(

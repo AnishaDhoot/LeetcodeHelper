@@ -470,6 +470,29 @@ def test_badge_test_flow():
     assert active_res.json() is None
 
 
+@patch("backend.main.check_and_increment_ai_quota")
+def test_analyze_submission_quota_exceeded(mock_quota_check):
+    from fastapi import HTTPException
+    mock_quota_check.side_effect = HTTPException(status_code=429, detail="Daily AI request limit reached.")
+
+    payload = {
+        "problem_id": "contains-duplicate",
+        "problem_title": "Contains Duplicate",
+        "code": "some faulty code",
+        "language": "java",
+        "verdict": "Wrong Answer",
+        "error_details": "Failed testcase [1, 2, 3]",
+        "test_cases": [{"input": "[1, 2, 3]", "expected": "false", "actual": "true"}],
+        "hints_used": 0
+    }
+
+    response = client.post("/submissions/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["root_cause_category"] == "quota_exceeded"
+    assert "limit reached" in data["explanation"].lower()
+
+
 if __name__ == "__main__":
     print("Starting backend tests...")
     test_db_setup()
@@ -492,5 +515,6 @@ if __name__ == "__main__":
     test_explain_back()
     test_mock_interview()
     test_weekly_journal()
+    test_analyze_submission_quota_exceeded()
     print("All backend tests passed successfully!")
 
