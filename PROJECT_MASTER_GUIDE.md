@@ -233,6 +233,26 @@ During development, five critical production-level bugs were identified, diagnos
 * **Root Cause**: `fetchSolvedProblemsViaTab` sent 20 concurrent GraphQL requests per batch without delay.
 * **Fix**: Reduced batch size to 5 and added an 80ms delay between batches.
 
+### Case Study 6: Daily AI Quota Concurrent Race Conditions
+* **Symptom**: Users could exceed the daily limit of 15 LLM requests by making rapid concurrent requests.
+* **Root Cause**: The check-and-increment transaction on SQLite was not thread-safe and was susceptible to double-read race conditions in Python's multi-threaded FastAPI execution.
+* **Fix**: Introduced `threading.Lock()` wrapping `check_and_increment_ai_quota` to guarantee thread-safe atomic limit operations.
+
+### Case Study 7: Pydantic V2 Migration & Python 3.12+ Datetime Deprecations
+* **Symptom**: Test execution threw deprecation warnings for class-based Pydantic configurations and the `datetime.utcnow()` method.
+* **Root Cause**: Legacy Config classes were used inside Pydantic schemas, and `datetime.utcnow()` has been deprecated starting in Python 3.12.
+* **Fix**: Replaced schemas with `model_config = ConfigDict(from_attributes=True)` and added a `get_utc_now()` timezone-aware UTC naive datetime generator.
+
+### Case Study 8: Mock Interview Page Redirection State Loss
+* **Symptom**: Starting a mock interview redirected the page, tearing down the extension DOM node and resetting in-memory UI states (timer, locked editor status).
+* **Root Cause**: Mounting React inside the tab DOM means page reloads destroy React memory.
+* **Fix**: Built a `/mock-interview/active` endpoint queried on mount to automatically recover current mock state (time remaining, active problem, gate locks) upon reload.
+
+### Case Study 9: Spaced Repetition Load-Time Reminders
+* **Symptom**: Users missed their due spaced repetition cards because they only saw them when manually opening the extension panel.
+* **Root Cause**: No automatic alert mechanism on LeetCode page load.
+* **Fix**: Injected a floating review reminder card on the bottom-left of LeetCode if background calls indicate reviews are due today.
+
 ---
 
 ## 7. Interview Preparation Guide & Technical Q&A
