@@ -22,7 +22,10 @@ so rating 800 → 0.0, 1600 → ~0.67, 2000 → 1.0.
 
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+def get_utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition
@@ -108,22 +111,16 @@ def update_mastery_on_submission(
         db.add(mastery)
         db.flush()  # assign PK before we modify it
 
-    now = datetime.utcnow()
-
-    # --- Elo calculation ---
-    k = _k_factor(mastery.attempts_count)
-    opponent = _problem_rating(difficulty)
-    actual = 1.0 if is_success else 0.0
-
-    new_rating = _elo_update(mastery.rating, opponent, actual, k)
-    # Clamp to a sane range so ratings stay interpretable
-    mastery.rating = max(400.0, min(3000.0, new_rating))
+    now = get_utc_now()
 
     # --- Bookkeeping ---
     mastery.attempts_count += 1
     if is_success:
         mastery.success_count += 1
-    mastery.last_updated = now
+    mastery.last_updated = get_utc_now()
+
+    # Keep rating column aligned with level
+    mastery.rating = 800.0 + (mastery.level or 0) * 240.0
 
     # --- Spaced-repetition scheduling ---
     score = mastery.mastery_score  # derived 0-1 from model property
@@ -158,7 +155,7 @@ def update_spaced_repetition(db: Session, problem_id: str) -> SpacedRepetition:
     4 → review in 30 days (1 month review)
     5 → completed / mastered, far-future date
     """
-    now = datetime.utcnow()
+    now = get_utc_now()
     sr = db.query(SpacedRepetition).filter(SpacedRepetition.problem_id == problem_id).first()
 
     if not sr:
@@ -290,7 +287,7 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
     focus_topic : prioritise this topic when non-None
     company     : filter problem pool to those with this company tag (1.1)
     """
-    now = datetime.utcnow()
+    now = get_utc_now()
 
     # 1. Gather active spaced-repetition reviews that are due
     reviews_due = db.query(SpacedRepetition).filter(
@@ -310,6 +307,7 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
                 "difficulty": prob.difficulty,
                 "due_date": r.next_due,
                 "stage": r.stage,
+                "topics": prob.topics,
             })
             due_problem_ids.add(prob.id)
 
@@ -369,6 +367,7 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
                 "url": p.url,
                 "difficulty": p.difficulty,
                 "reason": reason,
+                "topics": p.topics,
             })
             recommended_ids.add(p.id)
             return True
@@ -381,28 +380,28 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
 
         topic = topic_record.topic
         mastery_score = topic_record.mastery_score
-        rating = topic_record.rating
+        level = topic_record.level or 0
+        badge = topic_record.badge
 
-        # --- Tier 2.3: difficulty ramp for new topics ---
-        if topic_record.attempts_count < RAMP_THRESHOLD:
+        if level == 0:
             target_difficulty = "Easy"
             difficulty_reason = (
-                f"Starting your {topic} journey with Easy problems to build a foundation."
+                f"Locked badge for {topic}. Try Easy questions to build foundation and start a test!"
             )
-        elif mastery_score < 0.40:
+        elif level == 1:
             target_difficulty = "Easy"
             difficulty_reason = (
-                f"Your Elo rating for {topic} is {rating:.0f} (mastery {mastery_score:.0%})."
+                f"You have the Bronze badge for {topic}. Try Easy questions to practice!"
             )
-        elif mastery_score < 0.65:
+        elif level in [2, 3]:
             target_difficulty = "Medium"
             difficulty_reason = (
-                f"Your Elo rating for {topic} is {rating:.0f} (mastery {mastery_score:.0%})."
+                f"You have the {badge} badge for {topic}. Recommending Medium difficulty."
             )
         else:
             target_difficulty = "Hard"
             difficulty_reason = (
-                f"Your Elo rating for {topic} is {rating:.0f} (mastery {mastery_score:.0%})."
+                f"You have the {badge} badge for {topic}. Challenging you with Hard questions!"
             )
 
         # Adjust for recent streaks
@@ -456,7 +455,7 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
                 )
 
         # Primary: problems matching topic & target difficulty (not solved recently)
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        seven_days_ago = get_utc_now() - timedelta(days=7)
         problems = [
             p for p in topic_problems if p.difficulty == target_difficulty
         ]

@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.database import SessionLocal, get_db
-from backend.models import Problem, Attempt, TopicMastery
+from backend.models import Problem, Attempt, TopicMastery, BadgeTest, UserConfig, MockInterviewSession
 from unittest.mock import patch
 import datetime
 
@@ -10,6 +10,14 @@ client = TestClient(app)
 def test_db_setup():
     db = SessionLocal()
     try:
+        # Clean up any leftover badge tests from previous runs to prevent 403 locks
+        db.query(BadgeTest).delete()
+        # Clean up leftover mock sessions
+        db.query(MockInterviewSession).delete()
+        # Clean up any AI quota keys to prevent test quota failures
+        db.query(UserConfig).filter(UserConfig.key.like("ai_limit_%")).delete()
+        db.commit()
+
         problems = db.query(Problem).all()
         print(f"Verified: found {len(problems)} problems in DB.")
         assert len(problems) > 0, "No problems found in DB."
@@ -29,6 +37,9 @@ def test_get_mastery():
     assert "topic" in data[0]
     assert "mastery_score" in data[0]  # derived property, always present
     assert "rating" in data[0]         # Elo rating column
+    assert "level" in data[0]
+    assert "badge" in data[0]
+    assert "next_questions" in data[0]
 
 def test_get_recommendation():
     response = client.get("/problems/next")
@@ -61,7 +72,8 @@ def test_analyze_submission_success():
     target_topic = [t.strip() for t in prob.topics.split(",") if t.strip()][0] if prob and prob.topics else "Arrays & Hashing"
     mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
     initial_attempts = mastery_before.attempts_count if mastery_before else 0
-    initial_rating = mastery_before.rating if mastery_before else 1200.0
+    initial_successes = mastery_before.success_count if mastery_before else 0
+    initial_level = mastery_before.level if mastery_before else 0
     db.close()
 
     response = client.post("/submissions/analyze", json=payload)
@@ -70,13 +82,13 @@ def test_analyze_submission_success():
     print(f"POST /submissions/analyze (Accepted) returns: {data}")
     assert data["root_cause_category"] == "none"
 
-    # Verify that the topic's Elo rating increased on success
+    # Verify that the topic's attempt and success count increased
     db = SessionLocal()
     try:
         mastery = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
-        print(f"{target_topic} rating after success: {mastery.rating:.1f} (was {initial_rating:.1f})")
-        assert mastery.rating > initial_rating, "Elo rating must increase on a successful submission"
+        print(f"{target_topic} level after success: {mastery.level} (was {initial_level})")
         assert mastery.attempts_count == initial_attempts + 1
+        assert mastery.success_count == initial_successes + 1
         
         # Verify attempt was recorded with hints
         latest_attempt = db.query(Attempt).filter(Attempt.problem_id == "two-sum").order_by(Attempt.id.desc()).first()
@@ -110,7 +122,7 @@ def test_analyze_submission_failure(mock_diagnose):
     target_topic = [t.strip() for t in prob.topics.split(",") if t.strip()][0] if prob and prob.topics else "Arrays & Hashing"
     mastery_before = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
     initial_attempts = mastery_before.attempts_count if mastery_before else 0
-    initial_rating = mastery_before.rating if mastery_before else 1200.0
+    initial_rating = mastery_before.rating if mastery_before else 800.0
     db.close()
 
     response = client.post("/submissions/analyze", json=payload)
@@ -120,13 +132,13 @@ def test_analyze_submission_failure(mock_diagnose):
     assert data["root_cause_category"] == "implementation_bug"
     assert "Off-by-one" in data["explanation"]
 
-    # Verify that Elo rating decreased and attempt count tracked
+    # Verify attempt count tracked and rating unchanged
     db = SessionLocal()
     try:
         mastery = db.query(TopicMastery).filter(TopicMastery.topic == target_topic).first()
         print(f"{target_topic} rating after failure: {mastery.rating:.1f} (was {initial_rating:.1f})")
         assert mastery.attempts_count == initial_attempts + 1
-        assert mastery.rating < initial_rating, "Elo rating must decrease on a failed submission"
+        assert mastery.rating == initial_rating, "Rating must not change on a failed submission outside a test"
 
         latest_attempt = db.query(Attempt).filter(Attempt.problem_id == "contains-duplicate").order_by(Attempt.id.desc()).first()
         assert latest_attempt is not None
@@ -256,11 +268,9 @@ def test_sync_solved():
         # for 2 problems across 2 probs the seed is for count=2)
         m = db.query(TopicMastery).filter(TopicMastery.topic == sentinel_topic).first()
         assert m is not None
-        # seed rating = 800 + 1200*log(3)/log(51) ≈ 1136 < 1200 for only 2 solves
-        # so we simply check the row exists and is a valid Elo rating
-        assert m.rating >= 400.0
+        assert m.rating == 800.0
         assert m.attempts_count == 2
-        assert m.success_count == 2  # synced solves treated as successes
+        assert m.success_count == 0  # synced solves do not count towards badges
 
         # Existing "Arrays & Hashing" mastery must be unchanged by the sync
         existing = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
@@ -340,14 +350,41 @@ def test_explain_back(mock_check):
 
 
 def test_mock_interview():
+    # Verify initially no active mock session
+    active_before = client.get("/mock-interview/active")
+    assert active_before.status_code == 200
+    assert active_before.json() is None
+
+    # Start mock interview
     start_res = client.post("/mock-interview/start", json={"time_limit_seconds": 2700})
     assert start_res.status_code == 200
     session = start_res.json()
     assert "session_id" in session
 
+    # Verify active mock session returns details
+    active_after = client.get("/mock-interview/active")
+    assert active_after.status_code == 200
+    active_data = active_after.json()
+    assert active_data is not None
+    assert active_data["session_id"] == session["session_id"]
+    assert active_data["approach_submitted"] is False
+
+    # Submit approach explanation
     app_res = client.post("/mock-interview/approach", json={"session_id": session["session_id"], "approach_text": "Use two pointers"})
     assert app_res.status_code == 200
     assert app_res.json()["status"] == "approach_accepted"
+
+    # Verify approach_submitted updates to True
+    active_submitted = client.get("/mock-interview/active")
+    assert active_submitted.status_code == 200
+    assert active_submitted.json()["approach_submitted"] is True
+
+    # Test AI quota endpoint
+    quota_res = client.get("/ai/quota")
+    assert quota_res.status_code == 200
+    quota_data = quota_res.json()
+    assert "used" in quota_data
+    assert quota_data["limit"] == 15
 
 
 def test_weekly_journal():
@@ -358,6 +395,81 @@ def test_weekly_journal():
     assert "total_attempts" in data
 
 
+def test_badge_test_flow():
+    # Clean up Arrays & Hashing topic level and any active badge test
+    db = SessionLocal()
+    try:
+        db.query(BadgeTest).filter(BadgeTest.topic == "Arrays & Hashing").delete()
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
+        if mastery:
+            mastery.level = 0
+            mastery.rating = 800.0
+        db.commit()
+    finally:
+        db.close()
+
+    # Start badge test
+    start_res = client.post("/badge-test/start", json={"topic": "Arrays & Hashing"})
+    assert start_res.status_code == 200
+    test_data = start_res.json()
+    assert test_data["status"] == "active"
+    assert test_data["level"] == 1
+    p1 = test_data["problem1"]["id"]
+    p2 = test_data["problem2"]["id"]
+
+    # Verify hints are blocked during test
+    hint_payload = {
+        "problem_id": p1,
+        "problem_title": test_data["problem1"]["title"],
+        "code": "class Solution { }",
+        "language": "java"
+    }
+    hint_res = client.post("/hints/get", json=hint_payload)
+    assert hint_res.status_code == 403
+    assert "locked" in hint_res.json()["detail"].lower()
+
+    # Solve first problem
+    solve_payload1 = {
+        "problem_id": p1,
+        "problem_title": test_data["problem1"]["title"],
+        "code": "class Solution { }",
+        "language": "java",
+        "verdict": "Accepted",
+        "time_taken_seconds": 120,
+        "hints_used": 0
+    }
+    sol1_res = client.post("/submissions/analyze", json=solve_payload1)
+    assert sol1_res.status_code == 200
+
+    # Solve second problem
+    solve_payload2 = {
+        "problem_id": p2,
+        "problem_title": test_data["problem2"]["title"],
+        "code": "class Solution { }",
+        "language": "java",
+        "verdict": "Accepted",
+        "time_taken_seconds": 120,
+        "hints_used": 0
+    }
+    sol2_res = client.post("/submissions/analyze", json=solve_payload2)
+    assert sol2_res.status_code == 200
+
+    # Verify badge level increased and rating is updated
+    db = SessionLocal()
+    try:
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
+        assert mastery.level == 1
+        assert mastery.badge == "Bronze"
+        assert mastery.rating == 1040.0
+    finally:
+        db.close()
+
+    # Verify active test returns None (since it passed and is no longer active)
+    active_res = client.get("/badge-test/active")
+    assert active_res.status_code == 200
+    assert active_res.json() is None
+
+
 if __name__ == "__main__":
     print("Starting backend tests...")
     test_db_setup()
@@ -365,6 +477,7 @@ if __name__ == "__main__":
     test_get_recommendation()
     test_analyze_submission_success()
     test_analyze_submission_failure()
+    test_badge_test_flow()
     test_health()
     test_check_approach()
     test_get_hint()

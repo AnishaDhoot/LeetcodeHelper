@@ -1,7 +1,10 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
-from datetime import datetime
-from pydantic import BaseModel
+from datetime import datetime, timezone
+from pydantic import BaseModel, ConfigDict
+
+def get_utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from typing import List, Optional
 from backend.database import Base
 
@@ -30,7 +33,7 @@ class Attempt(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     problem_id = Column(String, ForeignKey("problems.id"), nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime, default=get_utc_now, nullable=False)
     verdict = Column(String, nullable=False) # e.g., Wrong Answer, Accepted, etc.
     root_cause_category = Column(String, nullable=True) # wrong_approach, implementation_bug, etc.
     explanation_text = Column(Text, nullable=True)
@@ -48,13 +51,25 @@ class TopicMastery(Base):
     rating = Column(Float, default=1200.0, nullable=False)
     attempts_count = Column(Integer, default=0, nullable=False)
     success_count = Column(Integer, default=0, nullable=False)
-    last_updated = Column(DateTime, default=datetime.utcnow, nullable=False)
+    level = Column(Integer, default=0, nullable=False)
+    last_updated = Column(DateTime, default=get_utc_now, nullable=False)
     next_review_date = Column(DateTime, nullable=True)
 
     @property
+    def badge(self) -> str:
+        badges = {
+            0: "None",
+            1: "Bronze",
+            2: "Silver",
+            3: "Gold",
+            4: "Platinum",
+            5: "Diamond"
+        }
+        return badges.get(self.level or 0, "None")
+
+    @property
     def mastery_score(self) -> float:
-        # Maps rating to 0.0 - 1.0 (800 -> 0.0, 1600 -> ~0.5, 2000+ -> ~1.0)
-        return max(0.0, min(1.0, (self.rating - 800) / 1200))
+        return (self.level or 0) / 5.0
 
     @property
     def success_rate(self) -> float:
@@ -71,6 +86,21 @@ class TopicMastery(Base):
         return self.next_review_date
 
 
+class BadgeTest(Base):
+    __tablename__ = "badge_tests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    topic = Column(String, nullable=False)
+    level = Column(Integer, nullable=False) # level being tested for (1-5)
+    status = Column(String, default="active") # "active", "passed", "abandoned"
+    problem1_id = Column(String, nullable=False)
+    problem2_id = Column(String, nullable=False)
+    problem1_solved = Column(Boolean, default=False, nullable=False)
+    problem2_solved = Column(Boolean, default=False, nullable=False)
+    start_time = Column(DateTime, default=get_utc_now, nullable=False)
+    end_time = Column(DateTime, nullable=True)
+
+
 class UserConfig(Base):
     """Simple key/value store for user preferences (e.g. focus topic, critique estimates)."""
     __tablename__ = "user_config"
@@ -84,7 +114,7 @@ class SpacedRepetition(Base):
 
     problem_id = Column(String, ForeignKey("problems.id"), primary_key=True, index=True)
     stage = Column(Integer, default=1, nullable=False) # 1: 3 days, 2: 7 days, 3: 14 days, 4: complete
-    last_solved = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_solved = Column(DateTime, default=get_utc_now, nullable=False)
     next_due = Column(DateTime, nullable=False)
 
     problem = relationship("Problem")
@@ -105,7 +135,7 @@ class MockInterviewSession(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     problem_id = Column(String, ForeignKey("problems.id"), nullable=False)
-    start_time = Column(DateTime, default=datetime.utcnow, nullable=False)
+    start_time = Column(DateTime, default=get_utc_now, nullable=False)
     time_limit_seconds = Column(Integer, default=2700, nullable=False)  # 45 min default
     company = Column(String, nullable=True)
     approach_submitted_at = Column(DateTime, nullable=True)
@@ -134,8 +164,7 @@ class SaveProblemNotesRequest(BaseModel):
     personal_difficulty: Optional[str] = None
 
 class ProblemSchema(ProblemBase):
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class AttemptBase(BaseModel):
     problem_id: str
@@ -152,8 +181,14 @@ class AttemptSchema(AttemptBase):
     id: int
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+class BadgeTestProblemSchema(BaseModel):
+    id: str
+    title: str
+    url: str
+    difficulty: str
+
 
 class TopicMasterySchema(BaseModel):
     topic: str
@@ -161,11 +196,30 @@ class TopicMasterySchema(BaseModel):
     attempts_count: int
     success_rate: float
     rating: float
+    level: int
+    badge: str
+    next_questions: List[BadgeTestProblemSchema] = []
     last_attempted: Optional[datetime] = None
     next_due_date: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BadgeTestStartRequest(BaseModel):
+    topic: str
+
+
+class BadgeTestSchema(BaseModel):
+    id: int
+    topic: str
+    level: int
+    status: str
+    problem1: BadgeTestProblemSchema
+    problem2: BadgeTestProblemSchema
+    problem1_solved: bool
+    problem2_solved: bool
+    start_time: datetime
+    end_time: Optional[datetime] = None
 
 class SubmissionAnalyzeRequest(BaseModel):
     problem_id: str
@@ -221,6 +275,7 @@ class TopicStatItem(BaseModel):
     topic: str
     solved_count: int
     mastery_score: float
+    badge: Optional[str] = None
 
 
 class TopicAnalysisResponse(BaseModel):

@@ -236,6 +236,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // --- Badge Test actions ---
+  if (request.action === "start_badge_test") {
+    backendFetch("/badge-test/start", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_active_badge_test") {
+    backendFetch("/badge-test/active")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "abandon_badge_test") {
+    backendFetch("/badge-test/abandon", { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- AI quota and active mock interview actions ---
+  if (request.action === "get_ai_quota") {
+    backendFetch("/ai/quota")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_active_mock") {
+    backendFetch("/mock-interview/active")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // --- Code Coach actions ---
   if (request.action === "check_approach") {
     backendFetch("/approach/check", { method: "POST", body: request.payload })

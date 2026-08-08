@@ -314,3 +314,159 @@ window.dsaTutor.setEditorReadOnly = (readOnly) => {
 // Start observing
 observer.observe(document.body, { childList: true, subtree: true });
 console.log('[DSA Tutor Content] DOM observer and overlay UI initialized.');
+
+// Spaced Repetition Reminder banner injection on LeetCode page load
+const injectSpacedRepetitionReminder = () => {
+  chrome.runtime.sendMessage({ action: 'get_recommendation' }, (res) => {
+    if (res && res.success && res.data && res.data.reviews && res.data.reviews.length > 0) {
+      const dueReviews = res.data.reviews;
+      
+      // Prevent duplicates
+      if (document.getElementById('dsa-tutor-spaced-reminder')) return;
+      
+      // Create container
+      const reminderDiv = document.createElement('div');
+      reminderDiv.id = 'dsa-tutor-spaced-reminder';
+      
+      // Inline styling for the premium reminder card
+      Object.assign(reminderDiv.style, {
+        position: 'fixed',
+        bottom: '24px',
+        left: '24px',
+        width: '320px',
+        backgroundColor: '#0e0e10',
+        border: '1px solid #1f1f23',
+        borderRadius: '12px',
+        padding: '16px',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)',
+        zIndex: '999999',
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        color: '#f4f4f5',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px'
+      });
+      
+      const headerDiv = document.createElement('div');
+      Object.assign(headerDiv.style, {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderBottom: '1px solid #1f1f23',
+        paddingBottom: '8px'
+      });
+      
+      const titleSpan = document.createElement('span');
+      titleSpan.innerHTML = '⏰ <strong>Review Due Today</strong>';
+      titleSpan.style.fontSize = '13px';
+      titleSpan.style.color = '#f4f4f5';
+      
+      const closeBtn = document.createElement('button');
+      closeBtn.innerText = '✕';
+      Object.assign(closeBtn.style, {
+        background: 'transparent',
+        border: 'none',
+        color: '#71717a',
+        cursor: 'pointer',
+        fontSize: '14px',
+        padding: '2px 6px'
+      });
+      closeBtn.onclick = () => {
+        reminderDiv.remove();
+      };
+      
+      headerDiv.appendChild(titleSpan);
+      headerDiv.appendChild(closeBtn);
+      reminderDiv.appendChild(headerDiv);
+      
+      const descDiv = document.createElement('div');
+      descDiv.innerText = 'Maintain your memory strength by practicing these spaced repetition items today:';
+      Object.assign(descDiv.style, {
+        fontSize: '11px',
+        color: '#a1a1aa',
+        lineHeight: '1.4'
+      });
+      reminderDiv.appendChild(descDiv);
+      
+      const listContainer = document.createElement('div');
+      Object.assign(listContainer.style, {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        maxHeight: '180px',
+        overflowY: 'auto'
+      });
+      
+      dueReviews.forEach((rev) => {
+        const itemA = document.createElement('a');
+        itemA.href = rev.url;
+        itemA.target = '_top';
+        Object.assign(itemA.style, {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 10px',
+          backgroundColor: '#18181b',
+          border: '1px solid #27272a',
+          borderRadius: '6px',
+          textDecoration: 'none',
+          color: '#e4e4e7',
+          fontSize: '12px',
+          transition: 'all 0.2s'
+        });
+        
+        itemA.onmouseenter = () => {
+          itemA.style.borderColor = '#3b82f6';
+          itemA.style.backgroundColor = '#1c1c21';
+        };
+        itemA.onmouseleave = () => {
+          itemA.style.borderColor = '#27272a';
+          itemA.style.backgroundColor = '#18181b';
+        };
+        
+        const textSpan = document.createElement('span');
+        textSpan.innerText = rev.title;
+        textSpan.style.fontWeight = '500';
+        textSpan.style.overflow = 'hidden';
+        textSpan.style.textOverflow = 'ellipsis';
+        textSpan.style.whiteSpace = 'nowrap';
+        textSpan.style.maxWidth = '180px';
+        
+        const diffSpan = document.createElement('span');
+        diffSpan.innerText = rev.difficulty;
+        Object.assign(diffSpan.style, {
+          fontSize: '9px',
+          fontWeight: '700',
+          padding: '2px 5px',
+          borderRadius: '4px',
+          textTransform: 'uppercase'
+        });
+        
+        if (rev.difficulty.toLowerCase() === 'easy') {
+          diffSpan.style.color = '#22c55e';
+          diffSpan.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
+        } else if (rev.difficulty.toLowerCase() === 'medium') {
+          diffSpan.style.color = '#eab308';
+          diffSpan.style.backgroundColor = 'rgba(234, 179, 8, 0.1)';
+        } else {
+          diffSpan.style.color = '#ef4444';
+          diffSpan.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+        }
+        
+        itemA.appendChild(textSpan);
+        itemA.appendChild(diffSpan);
+        listContainer.appendChild(itemA);
+      });
+      
+      reminderDiv.appendChild(listContainer);
+      document.body.appendChild(reminderDiv);
+    }
+  });
+};
+
+// Inject when document is fully loaded or active
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  injectSpacedRepetitionReminder();
+} else {
+  window.addEventListener('DOMContentLoaded', injectSpacedRepetitionReminder);
+}

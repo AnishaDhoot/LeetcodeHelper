@@ -2,13 +2,21 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import threading
+
+ai_quota_lock = threading.Lock()
+
+def get_utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 import math
 from collections import Counter
 
 from backend.database import get_db, engine, Base
 from backend.models import (
     Problem, Attempt, TopicMastery, UserConfig, SpacedRepetition, DailyActivity, MockInterviewSession,
+    BadgeTest, BadgeTestStartRequest, BadgeTestProblemSchema, BadgeTestSchema,
     SubmissionAnalyzeRequest, SubmissionAnalyzeResponse,
     ProblemRecommendResponse, TopicMasterySchema,
     CheckApproachRequest, CheckApproachResponse,
@@ -74,6 +82,9 @@ def _ensure_schema():
         if "personal_difficulty" not in prob_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE problems ADD COLUMN personal_difficulty TEXT"))
+        if "solved_live" not in prob_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE problems ADD COLUMN solved_live BOOLEAN DEFAULT 0 NOT NULL"))
 
     # -- attempts columns --
     if "attempts" in table_names:
@@ -85,6 +96,9 @@ def _ensure_schema():
     # -- topic_mastery Elo migration --
     if "topic_mastery" in table_names:
         tm_cols = {c["name"] for c in insp.get_columns("topic_mastery")}
+        if "level" not in tm_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE topic_mastery ADD COLUMN level INTEGER DEFAULT 0 NOT NULL"))
 
         if "mastery_score" in tm_cols:
             # Old flat-score schema → Elo schema via table reconstruction.
@@ -96,13 +110,14 @@ def _ensure_schema():
                         rating           REAL     NOT NULL DEFAULT 1200.0,
                         attempts_count   INTEGER  NOT NULL DEFAULT 0,
                         success_count    INTEGER  NOT NULL DEFAULT 0,
+                        level            INTEGER  NOT NULL DEFAULT 0,
                         last_updated     DATETIME,
                         next_review_date DATETIME
                     )
                 """))
                 conn.execute(text("""
                     INSERT INTO topic_mastery
-                        (topic, rating, attempts_count, success_count,
+                        (topic, rating, attempts_count, success_count, level,
                          last_updated, next_review_date)
                     SELECT
                         topic,
@@ -116,6 +131,7 @@ def _ensure_schema():
                             success_count,
                             CAST(COALESCE(attempts_count,0)*COALESCE(success_rate,0.0) AS INTEGER)
                         ),
+                        0,
                         COALESCE(last_updated, last_attempted, DATETIME('now')),
                         COALESCE(next_review_date, next_due_date)
                     FROM _topic_mastery_old
@@ -127,6 +143,7 @@ def _ensure_schema():
             elo_additions = [
                 ("rating",           "ALTER TABLE topic_mastery ADD COLUMN rating REAL DEFAULT 1200.0 NOT NULL"),
                 ("success_count",    "ALTER TABLE topic_mastery ADD COLUMN success_count INTEGER DEFAULT 0 NOT NULL"),
+                ("level",            "ALTER TABLE topic_mastery ADD COLUMN level INTEGER DEFAULT 0 NOT NULL"),
                 ("last_updated",     "ALTER TABLE topic_mastery ADD COLUMN last_updated DATETIME"),
                 ("next_review_date", "ALTER TABLE topic_mastery ADD COLUMN next_review_date DATETIME"),
             ]
@@ -173,7 +190,7 @@ app.add_middleware(
 )
 
 def _record_daily_activity(db: Session, is_success: bool):
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = get_utc_now().strftime("%Y-%m-%d")
     act = db.query(DailyActivity).filter(DailyActivity.date == today).first()
     if not act:
         act = DailyActivity(date=today, problems_attempted=1, problems_solved=1 if is_success else 0)
@@ -182,6 +199,59 @@ def _record_daily_activity(db: Session, is_success: bool):
         act.problems_attempted += 1
         if is_success:
             act.problems_solved += 1
+
+
+def check_active_test_lock(db: Session):
+    active = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if active:
+        raise HTTPException(
+            status_code=403,
+            detail="Hints and AI assistance are locked during an active Badge Test."
+        )
+
+
+def check_and_increment_ai_quota(db: Session, increment: bool = True):
+    with ai_quota_lock:
+        today_str = get_utc_now().strftime("%Y-%m-%d")
+        key = f"ai_limit_{today_str}"
+        
+        config = db.query(UserConfig).filter(UserConfig.key == key).first()
+        used = 0
+        if config:
+            try:
+                used = int(config.value)
+            except ValueError:
+                used = 0
+                
+        LIMIT = 15
+        if used >= LIMIT:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily AI request limit reached ({used}/{LIMIT}). Please try again tomorrow to avoid excessive API costs."
+            )
+            
+        if increment:
+            if not config:
+                config = UserConfig(key=key, value="1")
+                db.add(config)
+            else:
+                config.value = str(used + 1)
+            db.commit()
+
+
+@app.get("/ai/quota")
+def get_ai_quota(db: Session = Depends(get_db)):
+    """Returns the daily AI quota usage and limit."""
+    today_str = get_utc_now().strftime("%Y-%m-%d")
+    key = f"ai_limit_{today_str}"
+    config = db.query(UserConfig).filter(UserConfig.key == key).first()
+    used = 0
+    if config:
+        try:
+            used = int(config.value)
+        except ValueError:
+            used = 0
+    return {"used": used, "limit": 15}
 
 
 @app.post("/submissions/analyze", response_model=SubmissionAnalyzeResponse)
@@ -194,7 +264,6 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
     problem = db.query(Problem).filter(Problem.id == req.problem_id).first()
     if not problem:
         # Dynamically register the problem if not seeded
-        # Default topic to Arrays & Hashing as a fallback
         problem = Problem(
             id=req.problem_id,
             title=req.problem_title,
@@ -208,11 +277,37 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
 
     is_success = (req.verdict.lower() in ["accepted", "success"])
 
+    # If successful, set is_solved and solved_live in problem
+    if is_success:
+        problem.is_solved = True
+        problem.solved_live = True
+
     # 2. Update topic mastery & daily streak activity for each individual topic
     topic_list = [t.strip() for t in (problem.topics or "Arrays & Hashing").split(",") if t.strip()]
     if not topic_list:
         topic_list = ["Arrays & Hashing"]
     for t in topic_list:
+        # Check badge test progress before modifying TopicMastery rating
+        active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+        if active_test and active_test.topic == t and is_success:
+            updated = False
+            if active_test.problem1_id == problem.id and not active_test.problem1_solved:
+                active_test.problem1_solved = True
+                updated = True
+            elif active_test.problem2_id == problem.id and not active_test.problem2_solved:
+                active_test.problem2_solved = True
+                updated = True
+
+            if updated:
+                if active_test.problem1_solved and active_test.problem2_solved:
+                    active_test.status = "passed"
+                    active_test.end_time = get_utc_now()
+                    # Award badge!
+                    mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
+                    if mastery:
+                        mastery.level = active_test.level
+                    db.flush()
+
         update_mastery_on_submission(db, t, is_success=is_success, difficulty=problem.difficulty)
     _record_daily_activity(db, is_success=is_success)
 
@@ -238,6 +333,7 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
         )
 
     # For failures, run the LLM diagnosis
+    check_and_increment_ai_quota(db)
     diagnosis = generate_diagnosis(
         problem_title=problem.title,
         code=req.code,
@@ -275,11 +371,34 @@ def record_success(problem_id: str, topic: str, time_taken_seconds: Optional[int
     problem = db.query(Problem).filter(Problem.id == problem_id).first()
     if not problem:
         raise HTTPException(status_code=404, detail="Problem not found in database. Analyze first.")
-        
+
+    problem.is_solved = True
+    problem.solved_live = True
+
     topics_to_update = [t.strip() for t in (topic or problem.topics or "Arrays & Hashing").split(",") if t.strip()]
     for t in topics_to_update:
+        # Check badge test progress
+        active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+        if active_test and active_test.topic == t:
+            updated = False
+            if active_test.problem1_id == problem.id and not active_test.problem1_solved:
+                active_test.problem1_solved = True
+                updated = True
+            elif active_test.problem2_id == problem.id and not active_test.problem2_solved:
+                active_test.problem2_solved = True
+                updated = True
+
+            if updated:
+                if active_test.problem1_solved and active_test.problem2_solved:
+                    active_test.status = "passed"
+                    active_test.end_time = get_utc_now()
+                    mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
+                    if mastery:
+                        mastery.level = active_test.level
+                    db.flush()
+
         update_mastery_on_submission(db, t, is_success=True, difficulty=problem.difficulty)
-    
+
     attempt = Attempt(
         problem_id=problem.id,
         verdict="Accepted",
@@ -299,7 +418,129 @@ def get_mastery(db: Session = Depends(get_db)):
     Returns the current mastery data for all topics.
     """
     masteries = db.query(TopicMastery).all()
-    return masteries
+    result = []
+    for m in masteries:
+        # Find up to 2 problems in this topic that are interview questions and not solved
+        unsolved_problems = db.query(Problem).filter(
+            Problem.topics.like(f"%{m.topic}%"),
+            Problem.companies.isnot(None),
+            Problem.companies != "",
+            Problem.is_solved == False
+        ).limit(2).all()
+
+        result.append(TopicMasterySchema(
+            topic=m.topic,
+            mastery_score=m.mastery_score,
+            attempts_count=m.attempts_count,
+            success_rate=m.success_rate,
+            rating=m.rating,
+            level=m.level,
+            badge=m.badge,
+            next_questions=[BadgeTestProblemSchema(id=p.id, title=p.title, url=p.url, difficulty=p.difficulty) for p in unsolved_problems],
+            last_attempted=m.last_attempted,
+            next_due_date=m.next_due_date
+        ))
+    return result
+
+
+@app.post("/badge-test/start", response_model=BadgeTestSchema)
+def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
+    # Check if there is already an active test
+    active = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if active:
+        raise HTTPException(status_code=400, detail="A Badge Test is already active.")
+
+    mastery = db.query(TopicMastery).filter(TopicMastery.topic == req.topic).first()
+    if not mastery:
+        mastery = TopicMastery(topic=req.topic, level=0, rating=1200.0)
+        db.add(mastery)
+        db.flush()
+
+    target_level = mastery.level + 1
+    if target_level > 5:
+        raise HTTPException(status_code=400, detail="Maximum badge level (Diamond) already achieved.")
+
+    # Select 2 problems for the test
+    problems = db.query(Problem).filter(Problem.topics.like(f"%{req.topic}%")).all()
+    if target_level == 1:
+        targets = ["Easy"]
+    elif target_level in [2, 3]:
+        targets = ["Medium"]
+    elif target_level == 4:
+        targets = ["Medium", "Hard"]
+    else:
+        targets = ["Hard"]
+
+    candidates = [p for p in problems if p.difficulty in targets]
+    if len(candidates) < 2:
+        candidates = problems
+    if len(candidates) < 2:
+        candidates = db.query(Problem).all()
+
+    import random
+    selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]
+    if len(selected) < 2:
+        raise HTTPException(status_code=500, detail="Not enough problems in database to start test.")
+
+    test = BadgeTest(
+        topic=req.topic,
+        level=target_level,
+        problem1_id=selected[0].id,
+        problem2_id=selected[1].id,
+        problem1_solved=False,
+        problem2_solved=False,
+        start_time=get_utc_now()
+    )
+    db.add(test)
+    db.commit()
+    db.refresh(test)
+
+    return BadgeTestSchema(
+        id=test.id,
+        topic=test.topic,
+        level=test.level,
+        status=test.status,
+        problem1=BadgeTestProblemSchema(id=selected[0].id, title=selected[0].title, url=selected[0].url, difficulty=selected[0].difficulty),
+        problem2=BadgeTestProblemSchema(id=selected[1].id, title=selected[1].title, url=selected[1].url, difficulty=selected[1].difficulty),
+        problem1_solved=test.problem1_solved,
+        problem2_solved=test.problem2_solved,
+        start_time=test.start_time,
+        end_time=test.end_time
+    )
+
+
+@app.get("/badge-test/active", response_model=Optional[BadgeTestSchema])
+def get_active_badge_test(db: Session = Depends(get_db)):
+    test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if not test:
+        return None
+
+    p1 = db.query(Problem).filter(Problem.id == test.problem1_id).first()
+    p2 = db.query(Problem).filter(Problem.id == test.problem2_id).first()
+
+    return BadgeTestSchema(
+        id=test.id,
+        topic=test.topic,
+        level=test.level,
+        status=test.status,
+        problem1=BadgeTestProblemSchema(id=p1.id, title=p1.title, url=p1.url, difficulty=p1.difficulty),
+        problem2=BadgeTestProblemSchema(id=p2.id, title=p2.title, url=p2.url, difficulty=p2.difficulty),
+        problem1_solved=test.problem1_solved,
+        problem2_solved=test.problem2_solved,
+        start_time=test.start_time,
+        end_time=test.end_time
+    )
+
+
+@app.post("/badge-test/abandon")
+def abandon_badge_test(db: Session = Depends(get_db)):
+    test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if not test:
+        raise HTTPException(status_code=404, detail="No active Badge Test found.")
+    test.status = "abandoned"
+    test.end_time = get_utc_now()
+    db.commit()
+    return {"status": "success", "message": "Test abandoned."}
 
 
 @app.get("/problems/next", response_model=ProblemRecommendResponse)
@@ -324,8 +565,10 @@ def health():
 
 
 @app.post("/approach/check", response_model=CheckApproachResponse)
-def check_approach(req: CheckApproachRequest):
+def check_approach(req: CheckApproachRequest, db: Session = Depends(get_db)):
     """Critiques the user's approach and suggests optimizations."""
+    check_active_test_lock(db)
+    check_and_increment_ai_quota(db)
     result = generate_approach_critique(
         problem_title=req.problem_title,
         code=req.code,
@@ -342,8 +585,10 @@ def check_approach(req: CheckApproachRequest):
 
 
 @app.post("/hints/get", response_model=GetHintResponse)
-def get_hint(req: GetHintRequest):
+def get_hint(req: GetHintRequest, db: Session = Depends(get_db)):
     """Provides a progressive, conceptual hint without revealing the solution."""
+    check_active_test_lock(db)
+    check_and_increment_ai_quota(db)
     result = generate_hint(
         problem_title=req.problem_title,
         code=req.code,
@@ -354,8 +599,10 @@ def get_hint(req: GetHintRequest):
 
 
 @app.post("/hints/reveal", response_model=HintRevealResponse)
-def reveal_hint(req: HintRevealRequest):
+def reveal_hint(req: HintRevealRequest, db: Session = Depends(get_db)):
     """Provides a progressive, conceptual hint at the requested level (1, 2, or 3)."""
+    check_active_test_lock(db)
+    check_and_increment_ai_quota(db)
     result = generate_levelled_hint(
         problem_title=req.problem_title,
         code=req.code,
@@ -371,8 +618,10 @@ def reveal_hint(req: HintRevealRequest):
 
 
 @app.post("/edge-cases/get", response_model=GetEdgeCasesResponse)
-def get_edge_cases(req: GetEdgeCasesRequest):
+def get_edge_cases(req: GetEdgeCasesRequest, db: Session = Depends(get_db)):
     """Identifies potential edge cases and critiques the problem constraints."""
+    check_active_test_lock(db)
+    check_and_increment_ai_quota(db)
     result = analyze_edge_cases(
         problem_title=req.problem_title,
         code=req.code,
@@ -386,8 +635,10 @@ def get_edge_cases(req: GetEdgeCasesRequest):
 
 
 @app.post("/help/ask", response_model=AskHelpResponse)
-def ask_help(req: AskHelpRequest):
+def ask_help(req: AskHelpRequest, db: Session = Depends(get_db)):
     """Answers a user's custom question about their code or the problem."""
+    check_active_test_lock(db)
+    check_and_increment_ai_quota(db)
     result = answer_custom_question(
         problem_title=req.problem_title,
         code=req.code,
@@ -445,8 +696,8 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             sr = SpacedRepetition(
                 problem_id=prob.problem_id,
                 stage=1,
-                last_solved=datetime.utcnow(),
-                next_due=datetime.utcnow() + timedelta(days=3)
+                last_solved=get_utc_now(),
+                next_due=get_utc_now() + timedelta(days=3)
             )
             db.add(sr)
 
@@ -457,23 +708,19 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
         solved_count = solved_per_topic[topic]
         mastery = db.query(TopicMastery).filter(TopicMastery.topic == topic).first()
         if not mastery:
-            # Brand-new topic: seed from the sync using Elo rating.
+            # Brand-new topic: seed with level 0 (Locked badge)
             mastery = TopicMastery(
                 topic=topic,
-                rating=_seed_elo_rating(solved_count),
+                rating=800.0,
                 attempts_count=solved_count,
-                success_count=solved_count,  # treat all synced solves as successes
+                success_count=0,
+                level=0
             )
             db.add(mastery)
             new_topics += 1
             seeded_topics += 1
         elif solved_count > mastery.attempts_count:
-            # Existing topic whose live attempts are below the sync count: bring
-            # the seed up, but never lower it (live progress wins on the way down).
             mastery.attempts_count = solved_count
-            mastery.success_count = max(mastery.success_count, solved_count)
-            seeded_rating = _seed_elo_rating(solved_count)
-            mastery.rating = max(mastery.rating, seeded_rating)
             seeded_topics += 1
 
     db.commit()
@@ -510,7 +757,8 @@ def get_topic_analysis(db: Session = Depends(get_db)):
     items = []
     for topic, count in topic_solved.items():
         score = mastery_rows.get(topic).mastery_score if topic in mastery_rows else 0.0
-        items.append(TopicStatItem(topic=topic, solved_count=count, mastery_score=score or 0.0))
+        badge = mastery_rows.get(topic).badge if topic in mastery_rows else "None"
+        items.append(TopicStatItem(topic=topic, solved_count=count, mastery_score=score or 0.0, badge=badge))
 
     top_topics = sorted(items, key=lambda x: x.solved_count, reverse=True)
 
@@ -520,7 +768,8 @@ def get_topic_analysis(db: Session = Depends(get_db)):
         all_items.append(TopicStatItem(
             topic=topic,
             solved_count=topic_solved.get(topic, 0),
-            mastery_score=m.mastery_score or 0.0
+            mastery_score=m.mastery_score or 0.0,
+            badge=m.badge
         ))
     weak_topics = sorted(all_items, key=lambda x: x.mastery_score)[:5]
 
@@ -575,7 +824,7 @@ def get_companies(db: Session = Depends(get_db)):
 @app.get("/reviews/count")
 def get_reviews_count(db: Session = Depends(get_db)):
     """Returns count of active spaced repetition reviews due today (Tier 1.2)."""
-    now = datetime.utcnow()
+    now = get_utc_now()
     due_count = db.query(SpacedRepetition).filter(
         SpacedRepetition.next_due <= now,
         SpacedRepetition.stage < 5
@@ -586,14 +835,14 @@ def get_reviews_count(db: Session = Depends(get_db)):
 @app.get("/activity/streak", response_model=StreakResponse)
 def get_streak(db: Session = Depends(get_db)):
     """Returns current streak days and today's activity counts (Tier 1.4)."""
-    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    today_str = get_utc_now().strftime("%Y-%m-%d")
     today_act = db.query(DailyActivity).filter(DailyActivity.date == today_str).first()
     problems_today = today_act.problems_attempted if today_act else 0
     solved_today = today_act.problems_solved if today_act else 0
 
     # Calculate streak walking backwards
     streak = 0
-    curr_date = datetime.utcnow().date()
+    curr_date = get_utc_now().date()
     while True:
         d_str = curr_date.strftime("%Y-%m-%d")
         act = db.query(DailyActivity).filter(DailyActivity.date == d_str).first()
@@ -626,8 +875,9 @@ def get_time_trend(topic: str, db: Session = Depends(get_db)):
 
 
 @app.post("/submissions/explain-back", response_model=ExplainBackResponse)
-def explain_back(req: ExplainBackRequest):
+def explain_back(req: ExplainBackRequest, db: Session = Depends(get_db)):
     """Verifies user's self-explanation against their submitted code (Tier 3.2)."""
+    check_and_increment_ai_quota(db)
     res = generate_explain_back_check(
         code=req.code,
         language=req.language,
@@ -658,6 +908,7 @@ def store_complexity_estimate(req: ComplexityEstimateRequest, db: Session = Depe
 @app.post("/critique/reveal", response_model=ComplexityRevealResponse)
 def reveal_complexity_critique(req: ComplexityRevealRequest, db: Session = Depends(get_db)):
     """Runs LLM approach critique and compares with stored self-estimate (Tier 3.3)."""
+    check_and_increment_ai_quota(db)
     import json
     key = f"estimate_{req.problem_id}"
     cfg = db.query(UserConfig).filter(UserConfig.key == key).first()
@@ -715,6 +966,33 @@ def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
     )
 
 
+@app.get("/mock-interview/active")
+def get_active_mock_interview(db: Session = Depends(get_db)):
+    """Fetches the current active mock interview session if it hasn't been submitted yet."""
+    session = db.query(MockInterviewSession).filter(MockInterviewSession.submitted_at.is_(None)).order_by(MockInterviewSession.id.desc()).first()
+    if not session:
+        return None
+        
+    # Check if time is exceeded
+    elapsed = (get_utc_now() - session.start_time).total_seconds()
+    if elapsed > session.time_limit_seconds:
+        return None
+        
+    prob = db.query(Problem).filter(Problem.id == session.problem_id).first()
+    return {
+        "session_id": session.id,
+        "problem_id": session.problem_id,
+        "problem_title": prob.title if prob else session.problem_id,
+        "problem_url": prob.url if prob else "",
+        "difficulty": prob.difficulty if prob else "Medium",
+        "topics": prob.topics if prob else "",
+        "time_limit_seconds": session.time_limit_seconds,
+        "start_time": session.start_time,
+        "elapsed_seconds": int(elapsed),
+        "approach_submitted": session.approach_submitted_at is not None
+    }
+
+
 @app.post("/mock-interview/approach")
 def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)):
     """Records the approach explanation before unlocking code editor (Tier 4.1)."""
@@ -722,7 +1000,7 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
     if not session:
         raise HTTPException(status_code=404, detail="Mock session not found.")
 
-    session.approach_submitted_at = datetime.utcnow()
+    session.approach_submitted_at = get_utc_now()
     db.commit()
     return {"status": "approach_accepted", "session_id": session.id}
 
@@ -734,7 +1012,7 @@ def submit_mock_solution(req: MockSubmitRequest, db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=404, detail="Mock session not found.")
 
-    now = datetime.utcnow()
+    now = get_utc_now()
     session.submitted_at = now
     elapsed = int((now - session.start_time).total_seconds())
     session.time_taken_seconds = elapsed
@@ -756,7 +1034,7 @@ def submit_mock_solution(req: MockSubmitRequest, db: Session = Depends(get_db)):
 @app.get("/journal/weekly", response_model=WeeklyJournalResponse)
 def get_weekly_journal(db: Session = Depends(get_db)):
     """Generates past 7 days mistake journal and aggregated stats (Tier 5.1)."""
-    seven_days_ago = datetime.utcnow() - timedelta(days=7)
+    seven_days_ago = get_utc_now() - timedelta(days=7)
     attempts = db.query(Attempt).filter(Attempt.timestamp >= seven_days_ago).all()
 
     by_category = Counter()
@@ -772,7 +1050,34 @@ def get_weekly_journal(db: Session = Depends(get_db)):
                 example_problems.add(a.problem.title)
 
     start_str = seven_days_ago.strftime("%Y-%m-%d")
-    end_str = datetime.utcnow().strftime("%Y-%m-%d")
+    end_str = get_utc_now().strftime("%Y-%m-%d")
+
+    # Generate a detailed list of mistakes grouped by problem
+    failed_attempts = db.query(Attempt).filter(
+        Attempt.timestamp >= seven_days_ago,
+        Attempt.verdict != "Accepted"
+    ).order_by(Attempt.timestamp.desc()).all()
+
+    problem_mistakes = {}
+    for a in failed_attempts:
+        if not a.problem:
+            continue
+        pid = a.problem.id
+        if pid not in problem_mistakes:
+            problem_mistakes[pid] = {
+                "problem": a.problem,
+                "mistakes": []
+            }
+        problem_mistakes[pid]["mistakes"].append(a)
+
+    key_learnings = {
+        "wrong_approach": "Ensure you verify time/space complexities and write pseudo-code for alternative approaches (like hash maps, two pointers, or sliding window) before writing code.",
+        "implementation_bug": "Carefully dry-run code with small/empty inputs and check boundary conditions (such as off-by-one errors or null pointer checks).",
+        "time_limit_exceeded": "When dealing with large inputs, look for opportunities to reduce complexity from O(N^2) to O(N log N) or O(N) using sorting, hashing, or binary search.",
+        "edge_case_missed": "Before submitting, explicitly trace code execution with edge cases like empty inputs, single element arrays, or negative numbers.",
+        "conceptual_gap": "Spend time understanding the fundamental theory of the algorithm or data structure before jumping to the implementation.",
+        "none": "Ensure code correctness and review details before submitting."
+    }
 
     md_lines = [
         f"# Weekly DSA Practice Digest ({start_str} to {end_str})",
@@ -784,6 +1089,29 @@ def get_weekly_journal(db: Session = Depends(get_db)):
     ]
     for cat, cnt in by_category.items():
         md_lines.append(f"- **{cat.replace('_', ' ').title()}**: {cnt}")
+
+    if problem_mistakes:
+        md_lines.append("")
+        md_lines.append("## Detailed Journal of Mistakes & Key Learnings")
+        md_lines.append("")
+        for pid, data in problem_mistakes.items():
+            prob = data["problem"]
+            md_lines.append(f"### ❌ [{prob.title}]({prob.url})")
+            md_lines.append(f"- **Difficulty**: {prob.difficulty} | **Topic**: {prob.topics}")
+            md_lines.append("- **Mistakes**:")
+            
+            latest_category = "none"
+            for m in data["mistakes"]:
+                date_str = m.timestamp.strftime("%Y-%m-%d %H:%M")
+                cat_display = m.root_cause_category.replace('_', ' ').title() if m.root_cause_category else "Unknown"
+                explanation = m.explanation_text if m.explanation_text else "No explanation provided."
+                md_lines.append(f"  - *{date_str}* ({cat_display}): {explanation}")
+                if m.root_cause_category and latest_category == "none":
+                    latest_category = m.root_cause_category
+                    
+            learning = key_learnings.get(latest_category, "Thoroughly analyze failures and write down the root cause to avoid repeating the mistake.")
+            md_lines.append(f"- **💡 Key Learning**: {learning}")
+            md_lines.append("")
 
     if example_problems:
         md_lines.extend(["", "## Review Suggested For Problems:", *[f"- {p}" for p in list(example_problems)[:10]]])
@@ -856,7 +1184,7 @@ def export_solved_csv(timeframe: str = "current_week", db: Session = Depends(get
     import io
     from fastapi import Response
 
-    now = datetime.utcnow()
+    now = get_utc_now()
     
     if timeframe in ["current_week", "past_7_days"]:
         cutoff = now - timedelta(days=7)

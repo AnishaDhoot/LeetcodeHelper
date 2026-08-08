@@ -18,11 +18,81 @@ export default function App() {
   const [diagnosis, setDiagnosis] = useState(null);
   const [error, setError] = useState(null);
 
+  // Badge Test states
+  const [activeTest, setActiveTest] = useState(null);
+
   // Code Coach states (persistent per tool)
   const [approachResult, setApproachResult] = useState(null);
   const [edgeResult, setEdgeResult] = useState(null);
   const [askResults, setAskResults] = useState([]);
   const [diagnosisResult, setDiagnosisResult] = useState(null);
+
+  const getBadgeEmoji = (badge) => {
+    switch (badge) {
+      case 'Bronze': return '🥉';
+      case 'Silver': return '🥈';
+      case 'Gold': return '🥇';
+      case 'Platinum': return '🛡️';
+      case 'Diamond': return '💎';
+      default: return '❌';
+    }
+  };
+
+  const fetchActiveTest = () => {
+    chrome.runtime.sendMessage({ action: 'get_active_badge_test' }, (res) => {
+      if (res && res.success) {
+        setActiveTest(res.data);
+      }
+    });
+  };
+
+  const startBadgeTest = (topic) => {
+    chrome.runtime.sendMessage({ action: 'start_badge_test', payload: { topic } }, (res) => {
+      if (res && res.success) {
+        setActiveTest(res.data);
+        setActiveTab('test');
+      } else {
+        alert(res?.error || 'Failed to start Badge Test.');
+      }
+    });
+  };
+
+  const abandonBadgeTest = () => {
+    if (!window.confirm('Are you sure you want to abandon this Badge Test? All progress for this test will be lost.')) return;
+    chrome.runtime.sendMessage({ action: 'abandon_badge_test' }, (res) => {
+      if (res && res.success) {
+        setActiveTest(null);
+        setActiveTab('mastery');
+        fetchMastery();
+      }
+    });
+  };
+
+  const [aiQuota, setAiQuota] = useState({ used: 0, limit: 15 });
+
+  const fetchAiQuota = () => {
+    chrome.runtime.sendMessage({ action: 'get_ai_quota' }, (res) => {
+      if (res && res.success && res.data) {
+        setAiQuota(res.data);
+      }
+    });
+  };
+
+  const fetchActiveMock = () => {
+    chrome.runtime.sendMessage({ action: 'get_active_mock' }, (res) => {
+      if (res && res.success && res.data) {
+        setMockSession(res.data);
+        setMockApproachSubmitted(res.data.approach_submitted);
+        const remaining = res.data.time_limit_seconds - res.data.elapsed_seconds;
+        setMockTimerSeconds(remaining > 0 ? remaining : 0);
+        setIsMockMode(true);
+        if (!res.data.approach_submitted && window.dsaTutor?.setEditorReadOnly) {
+          window.dsaTutor.setEditorReadOnly(true);
+        }
+      }
+    });
+  };
+
   const [coachFilter, setCoachFilter] = useState('all');
   const [coachLoading, setCoachLoading] = useState(null); // current action id or null
   const [coachError, setCoachError] = useState(null);
@@ -161,6 +231,9 @@ export default function App() {
         if (window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
         }
+        if (res.data.problem_url) {
+          window.location.href = res.data.problem_url;
+        }
       }
     });
   };
@@ -183,6 +256,7 @@ export default function App() {
       const ctx = await gatherContext(true);
       const payload = { problem_id: ctx.problem_id, code: ctx.code, language: ctx.language, user_explanation: userExplanationInput.trim() };
       chrome.runtime.sendMessage({ action: 'explain_back', payload }, (res) => {
+        fetchAiQuota();
         if (res && res.success) {
           setExplainBackResult(res.data);
         }
@@ -205,8 +279,10 @@ export default function App() {
       chrome.runtime.sendMessage({ action: 'critique_estimate', payload: estPayload }, () => {
         chrome.runtime.sendMessage({ action: 'critique_reveal', payload: ctx }, (response) => {
           setCoachLoading(null);
+          fetchAiQuota();
           if (response && response.success) {
             setApproachResult(response.data);
+            setCoachFilter('approach');
             setIsOpen(true);
             setActiveTab('coach');
           } else {
@@ -248,11 +324,14 @@ export default function App() {
       const ctx = await gatherContext(true);
       chrome.runtime.sendMessage({ action: messageAction, payload: ctx }, (response) => {
         setCoachLoading(null);
+        fetchAiQuota();
         if (response && response.success) {
           if (actionId === 'edge') {
             setEdgeResult(response.data);
+            setCoachFilter('edge');
           } else if (actionId === 'approach') {
             setApproachResult(response.data);
+            setCoachFilter('approach');
           }
           setIsOpen(true);
           setActiveTab('coach');
@@ -277,6 +356,7 @@ export default function App() {
       
       chrome.runtime.sendMessage({ action: 'reveal_hint', payload }, (response) => {
         setCoachLoading(null);
+        fetchAiQuota();
         if (response && response.success) {
           const newHint = { level: response.data.level, hint: response.data.hint };
           setHintsList(prev => {
@@ -285,6 +365,7 @@ export default function App() {
             return [...prev, newHint];
           });
           setCurrentHintLevel(response.data.level);
+          setCoachFilter('hints');
           if (window.dsaTutor) {
             window.dsaTutor.hintsUsed = response.data.level;
           }
@@ -311,9 +392,11 @@ export default function App() {
       const payload = { ...ctx, question: currentQ };
       chrome.runtime.sendMessage({ action: 'ask_help', payload }, (response) => {
         setCoachLoading(null);
+        fetchAiQuota();
         if (response && response.success) {
           setAskResults(prev => [...prev, { id: Date.now(), question: currentQ, answer: response.data.answer }]);
           setAskInput('');
+          setCoachFilter('ask');
           setIsOpen(true);
           setActiveTab('coach');
         } else {
@@ -466,6 +549,9 @@ export default function App() {
     fetchStreak();
     fetchCompanies();
     fetchWeakPairs();
+    fetchActiveTest();
+    fetchAiQuota();
+    fetchActiveMock();
 
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
@@ -495,6 +581,8 @@ export default function App() {
         fetchMastery();
         fetchRecommendation();
         fetchStreak();
+        fetchActiveTest();
+        fetchAiQuota();
       },
       setError: (errMessage) => {
         setLoading(false);
@@ -506,6 +594,8 @@ export default function App() {
         fetchMastery();
         fetchRecommendation();
         fetchStreak();
+        fetchActiveTest();
+        fetchAiQuota();
       }
     });
 
@@ -607,47 +697,49 @@ export default function App() {
       </div>
 
       {/* Tabs Menu */}
-      <div className="tabs-container">
-        <button
-          className={`tab-btn ${activeTab === 'mastery' ? 'active' : ''}`}
-          onClick={() => setActiveTab('mastery')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 3v18h18" />
-            <path d="m19 9-5 5-4-4-3 3" />
-          </svg>
-          Mastery
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
-          onClick={() => setActiveTab('coach')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
-            <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
-          </svg>
-          Coach
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'recommendation' ? 'active' : ''}`}
-          onClick={() => setActiveTab('recommendation')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="5 3 19 12 5 21 5 3" />
-          </svg>
-          Next
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
-          onClick={() => setActiveTab('history')}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="1 4 1 10 7 10" />
-            <path d="M3.51 15a9 9 0 1 0 .49-4.5" />
-          </svg>
-          Sync
-        </button>
-      </div>
+      {!activeTest && (
+        <div className="tabs-container">
+          <button
+            className={`tab-btn ${activeTab === 'mastery' ? 'active' : ''}`}
+            onClick={() => setActiveTab('mastery')}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18" />
+              <path d="m19 9-5 5-4-4-3 3" />
+            </svg>
+            Mastery
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
+            onClick={() => setActiveTab('coach')}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
+              <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
+            </svg>
+            Coach
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'recommendation' ? 'active' : ''}`}
+            onClick={() => setActiveTab('recommendation')}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            Next
+          </button>
+          <button
+            className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+            onClick={() => setActiveTab('history')}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 .49-4.5" />
+            </svg>
+            Sync
+          </button>
+        </div>
+      )}
 
       {/* Content Area */}
       <div className="tutor-content">
@@ -704,9 +796,83 @@ export default function App() {
               </div>
             )}
 
-            {/* Weak Pairs Prerequisite Warning (Tier 2.1) */}
-            {weakPairs.length > 0 && (
-              <div className="info-section alt-section" style={{ marginBottom: '12px', borderColor: '#f59e0b44', background: '#f59e0b11' }}>
+            {/* Badge Test Mode view */}
+        {activeTest && (
+          <div className="test-mode-container">
+            <div className="test-mode-header">
+              <div className="test-mode-title">
+                🏆 Badge Test: {activeTest.topic} Level {activeTest.level}
+              </div>
+              <p style={{ fontSize: '11px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
+                Solve both problems in LeetCode to unlock the <strong>{activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'}</strong> badge. Hints and Code Coach assistance are locked.
+              </p>
+            </div>
+            
+            <div className="test-mode-problem-list">
+              <div className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`}>
+                <div>
+                  <a
+                    href={activeTest.problem1.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="badge-quest-link"
+                    style={{ fontSize: '13px', fontWeight: '600' }}
+                  >
+                    1. {activeTest.problem1.title}
+                  </a>
+                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
+                    Difficulty: {activeTest.problem1.difficulty}
+                  </div>
+                </div>
+                <div>
+                  {activeTest.problem1_solved ? (
+                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
+                  )}
+                </div>
+              </div>
+
+              <div className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`}>
+                <div>
+                  <a
+                    href={activeTest.problem2.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="badge-quest-link"
+                    style={{ fontSize: '13px', fontWeight: '600' }}
+                  >
+                    2. {activeTest.problem2.title}
+                  </a>
+                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
+                    Difficulty: {activeTest.problem2.difficulty}
+                  </div>
+                </div>
+                <div>
+                  {activeTest.problem2_solved ? (
+                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+              <button className="abandon-btn" onClick={abandonBadgeTest}>
+                Abandon Test
+              </button>
+            </div>
+          </div>
+        )}
+          </div>
+        )}
+
+        {/* TAB 1: MASTERY OVERVIEW */}
+        {!activeTest && activeTab === 'mastery' && (
+          <div>
+            {weakPairs && weakPairs.length > 0 && (
+              <div className="info-section alt-section" style={{ marginBottom: '14px', borderLeftColor: '#fbbf24' }}>
                 <div className="section-label alt-label" style={{ color: '#fbbf24' }}>
                   💡 Prerequisite Review Suggestion
                 </div>
@@ -724,16 +890,24 @@ export default function App() {
             ) : (
               masteryData.map((data) => {
                 const pct = data.mastery_score * 100;
-                const level = pct >= 65 ? 'high' : pct >= 35 ? 'mid' : 'low';
+                const levelColor = pct >= 65 ? 'high' : pct >= 35 ? 'mid' : 'low';
                 return (
                   <div
                     key={data.topic}
                     className={`mastery-card ${data.topic === focusTopic ? 'mastery-card-focus' : ''}`}
-                    data-level={level}
+                    data-level={levelColor}
                   >
                     <div className="mastery-header">
                       <span className="mastery-name">{data.topic}</span>
-                      <span className="mastery-score">{pct.toFixed(0)}%</span>
+                      {data.badge !== 'None' ? (
+                        <span className="badge-status-pill earned">
+                          {getBadgeEmoji(data.badge)} {data.badge}
+                        </span>
+                      ) : (
+                        <span className="badge-status-pill locked">
+                          🔒 Locked
+                        </span>
+                      )}
                     </div>
                     <div className="progress-bar-bg">
                       <div
@@ -741,16 +915,38 @@ export default function App() {
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <div className="mastery-meta">
-                      <span>Solved: {data.attempts_count}</span>
-                      <button
-                        className={`focus-pick-btn ${data.topic === focusTopic ? 'active' : ''}`}
-                        onClick={() => setFocus(data.topic)}
-                        title={data.topic === focusTopic ? 'Remove focus' : 'Set as focus topic'}
-                      >
-                        {data.topic === focusTopic ? 'Focused' : 'Focus'}
-                      </button>
+                    <div className="mastery-meta" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '11px', color: '#a1a1aa' }}>Level {data.level}/5</span>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        {data.level < 5 ? (
+                          <button className="badge-btn" onClick={() => startBadgeTest(data.topic)}>
+                            🚀 Test L{data.level + 1}
+                          </button>
+                        ) : (
+                          <span style={{ color: '#22c55e', fontWeight: '600', fontSize: '11px' }}>🏆 Max Tier!</span>
+                        )}
+                        <button
+                          className={`focus-pick-btn ${data.topic === focusTopic ? 'active' : ''}`}
+                          onClick={() => setFocus(data.topic)}
+                          title={data.topic === focusTopic ? 'Remove focus' : 'Set as focus topic'}
+                        >
+                          {data.topic === focusTopic ? 'Focused' : 'Focus'}
+                        </button>
+                      </div>
                     </div>
+
+                    {data.level < 5 && data.next_questions && data.next_questions.length > 0 && (
+                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #27272a' }}>
+                        <div style={{ fontSize: '10px', color: '#71717a', marginBottom: '2px' }}>💡 Practice interview questions:</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          {data.next_questions.map(q => (
+                            <a key={q.id} href={q.url} target="_blank" rel="noreferrer" className="badge-quest-link">
+                              🚀 {q.title} <span style={{ fontSize: '9px', color: '#71717a' }}>({q.difficulty})</span>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -1204,27 +1400,46 @@ export default function App() {
             <h4 className="section-heading">Adaptive Recommendations</h4>
             {recommendation && recommendation.recommendations ? (
               <div className="rec-list-container">
-                {recommendation.recommendations.map((rec) => (
-                  <div key={rec.problem_id} className="rec-item-card">
-                    <div className="rec-title-row">
-                      <h5 className="rec-title">{rec.title}</h5>
-                      <span className={`difficulty-badge ${rec.difficulty.toLowerCase()}`}>
-                        {rec.difficulty}
-                      </span>
+                {recommendation.recommendations.map((rec) => {
+                  const recTopics = rec.topics ? rec.topics.split(',').map(t => t.trim()).filter(Boolean) : [];
+                  return (
+                    <div key={rec.problem_id} className="rec-item-card">
+                      <div className="rec-title-row">
+                        <h5 className="rec-title">{rec.title}</h5>
+                        <span className={`difficulty-badge ${rec.difficulty.toLowerCase()}`}>
+                          {rec.difficulty}
+                        </span>
+                      </div>
+                      <div className="rec-reason">
+                        {rec.reason}
+                      </div>
+
+                      {recTopics.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '8px 0' }}>
+                          {recTopics.map(t => (
+                            <button
+                              key={t}
+                              className={`focus-pick-btn ${t === focusTopic ? 'active' : ''}`}
+                              onClick={() => setFocus(t === focusTopic ? '' : t)}
+                              style={{ fontSize: '10px', padding: '2px 6px', border: '1px solid #27272a', borderRadius: '4px', cursor: 'pointer' }}
+                            >
+                              🎯 {t === focusTopic ? 'Focused' : `Focus on ${t}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <a
+                        className="rec-item-link"
+                        href={rec.url}
+                        target="_top"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        Attempt Problem
+                      </a>
                     </div>
-                    <div className="rec-reason">
-                      {rec.reason}
-                    </div>
-                    <a
-                      className="rec-item-link"
-                      href={rec.url}
-                      target="_top"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                      Attempt Problem
-                    </a>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="empty-state">Loading recommendations...</div>
@@ -1238,31 +1453,48 @@ export default function App() {
               </h4>
               {recommendation && recommendation.reviews ? (
                 recommendation.reviews.length > 0 ? (
-                  recommendation.reviews.map((rev) => (
-                    <div key={rev.problem_id} className="review-card">
-                      <div className="review-info">
-                        <div className="review-title-row">
-                          <span className="review-title">{rev.title}</span>
-                          <span className={`difficulty-badge ${rev.difficulty.toLowerCase()}`}>
-                            {rev.difficulty}
-                          </span>
+                  recommendation.reviews.map((rev) => {
+                    const revTopics = rev.topics ? rev.topics.split(',').map(t => t.trim()).filter(Boolean) : [];
+                    return (
+                      <div key={rev.problem_id} className="review-card">
+                        <div className="review-info">
+                          <div className="review-title-row">
+                            <span className="review-title">{rev.title}</span>
+                            <span className={`difficulty-badge ${rev.difficulty.toLowerCase()}`}>
+                              {rev.difficulty}
+                            </span>
+                          </div>
+                          <div className="review-meta">
+                            <span className={`review-badge stage-${rev.stage}`}>
+                              Review {rev.stage} ({rev.stage === 1 ? '3d' : rev.stage === 2 ? '7d' : '14d'})
+                            </span>
+                          </div>
+                          {revTopics.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                              {revTopics.map(t => (
+                                <button
+                                  key={t}
+                                  className={`focus-pick-btn ${t === focusTopic ? 'active' : ''}`}
+                                  onClick={() => setFocus(t === focusTopic ? '' : t)}
+                                  style={{ fontSize: '9px', padding: '2px 5px', border: '1px solid #27272a', borderRadius: '4px', cursor: 'pointer' }}
+                                >
+                                  🎯 {t === focusTopic ? 'Focused' : `Focus on ${t}`}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div className="review-meta">
-                          <span className={`review-badge stage-${rev.stage}`}>
-                            Review {rev.stage} ({rev.stage === 1 ? '3d' : rev.stage === 2 ? '7d' : '14d'})
-                          </span>
-                        </div>
+                        <a
+                          className="review-action-btn"
+                          href={rev.url}
+                          target="_top"
+                          title="Attempt Review"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </a>
                       </div>
-                      <a
-                        className="review-action-btn"
-                        href={rev.url}
-                        target="_top"
-                        title="Attempt Review"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                      </a>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="success-card">
                     <div className="success-card-icon">
@@ -1413,7 +1645,9 @@ export default function App() {
                         <div key={t.topic} className="weak-item">
                           <span className="weak-topic-name">{t.topic}</span>
                           <div className="weak-item-right">
-                            <span className="weak-score">{(t.mastery_score * 100).toFixed(0)}%</span>
+                            <span className="weak-score" style={{ marginRight: '6px' }}>
+                              {t.badge !== 'None' ? `${getBadgeEmoji(t.badge)} ${t.badge}` : '🔒 Locked'}
+                            </span>
                             <button
                               className="focus-pick-btn"
                               onClick={() => setFocus(t.topic)}
@@ -1440,6 +1674,11 @@ export default function App() {
           <span className={`status-dot ${backendOnline ? 'online' : backendOnline === false ? 'offline' : ''}`} />
           {backendOnline === null ? 'Connecting…' : backendOnline ? 'Online' : 'Offline'}
         </span>
+        {backendOnline && (
+          <span style={{ fontSize: '10px', color: '#a1a1aa' }}>
+            AI Daily Limit: {aiQuota.limit - aiQuota.used}/{aiQuota.limit} left
+          </span>
+        )}
         <span style={{color:'#27272a'}}>Kode v1</span>
       </div>
     </div>
