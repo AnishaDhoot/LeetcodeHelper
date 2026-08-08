@@ -3,9 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
-import threading
+import os
+from dotenv import load_dotenv
 
-ai_quota_lock = threading.Lock()
+# Load environment variables
+load_dotenv()
+
+AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "15"))
 
 def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -222,32 +226,56 @@ def check_active_test_lock(db: Session):
 
 
 def check_and_increment_ai_quota(db: Session, increment: bool = True):
-    with ai_quota_lock:
-        today_str = get_utc_now().strftime("%Y-%m-%d")
-        key = f"ai_limit_{today_str}"
+    from sqlalchemy import text
+    today_str = get_utc_now().strftime("%Y-%m-%d")
+    key = f"ai_limit_{today_str}"
+    
+    # 1. Ensure the row exists for today (insert 0 if ignore)
+    db.execute(
+        text("INSERT OR IGNORE INTO user_config (key, value) VALUES (:key, '0')"),
+        {"key": key}
+    )
+    db.commit()
+    
+    if increment:
+        # Atomic update and fetch new value
+        res = db.execute(
+            text(
+                "UPDATE user_config "
+                "SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) "
+                "WHERE key = :key AND CAST(value AS INTEGER) < :limit "
+                "RETURNING value"
+            ),
+            {"key": key, "limit": AI_DAILY_QUOTA_LIMIT}
+        )
+        row = res.fetchone()
+        db.commit()
         
-        config = db.query(UserConfig).filter(UserConfig.key == key).first()
-        used = 0
-        if config:
-            try:
-                used = int(config.value)
-            except ValueError:
-                used = 0
-                
-        LIMIT = 15
-        if used >= LIMIT:
+        if not row:
+            # If no row returned, it means value >= limit
+            current_val_res = db.execute(
+                text("SELECT value FROM user_config WHERE key = :key"),
+                {"key": key}
+            )
+            val_row = current_val_res.fetchone()
+            used = int(val_row[0]) if val_row else AI_DAILY_QUOTA_LIMIT
             raise HTTPException(
                 status_code=429,
-                detail=f"Daily AI request limit reached ({used}/{LIMIT}). Please try again tomorrow to avoid excessive API costs."
+                detail=f"Daily AI request limit reached ({used}/{AI_DAILY_QUOTA_LIMIT}). Please try again tomorrow to avoid excessive API costs."
             )
-            
-        if increment:
-            if not config:
-                config = UserConfig(key=key, value="1")
-                db.add(config)
-            else:
-                config.value = str(used + 1)
-            db.commit()
+    else:
+        # Just check current value
+        res = db.execute(
+            text("SELECT value FROM user_config WHERE key = :key"),
+            {"key": key}
+        )
+        row = res.fetchone()
+        used = int(row[0]) if row else 0
+        if used >= AI_DAILY_QUOTA_LIMIT:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily AI request limit reached ({used}/{AI_DAILY_QUOTA_LIMIT}). Please try again tomorrow to avoid excessive API costs."
+            )
 
 
 @app.get("/ai/quota")
@@ -262,7 +290,7 @@ def get_ai_quota(db: Session = Depends(get_db)):
             used = int(config.value)
         except ValueError:
             used = 0
-    return {"used": used, "limit": 15}
+    return {"used": used, "limit": AI_DAILY_QUOTA_LIMIT}
 
 
 @app.post("/submissions/analyze", response_model=SubmissionAnalyzeResponse)

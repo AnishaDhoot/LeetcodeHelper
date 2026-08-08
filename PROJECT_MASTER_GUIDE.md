@@ -234,9 +234,9 @@ During development, five critical production-level bugs were identified, diagnos
 * **Fix**: Reduced batch size to 5 and added an 80ms delay between batches.
 
 ### Case Study 6: Daily AI Quota Concurrent Race Conditions
-* **Symptom**: Users could exceed the daily limit of 15 LLM requests by making rapid concurrent requests.
+* **Symptom**: Users could exceed the daily limit of LLM requests by making rapid concurrent requests.
 * **Root Cause**: The check-and-increment transaction on SQLite was not thread-safe and was susceptible to double-read race conditions in Python's multi-threaded FastAPI execution.
-* **Fix**: Introduced `threading.Lock()` wrapping `check_and_increment_ai_quota` to guarantee thread-safe atomic limit operations.
+* **Fix**: Replaced the Python-level thread lock with an atomic SQL `UPDATE` statement: `UPDATE user_config SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = :key AND CAST(value AS INTEGER) < :limit RETURNING value`. If no row is returned, it immediately raises a 429. This guarantees database-level, process-safe atomic checks.
 
 ### Case Study 7: Pydantic V2 Migration & Python 3.12+ Datetime Deprecations
 * **Symptom**: Test execution threw deprecation warnings for class-based Pydantic configurations and the `datetime.utcnow()` method.

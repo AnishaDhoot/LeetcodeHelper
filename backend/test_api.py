@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from backend.main import app
+from backend.main import app, AI_DAILY_QUOTA_LIMIT, get_utc_now, check_and_increment_ai_quota
 from backend.database import SessionLocal, get_db
 from backend.models import Problem, Attempt, TopicMastery, BadgeTest, UserConfig, MockInterviewSession
 from unittest.mock import patch
@@ -384,7 +384,7 @@ def test_mock_interview():
     assert quota_res.status_code == 200
     quota_data = quota_res.json()
     assert "used" in quota_data
-    assert quota_data["limit"] == 15
+    assert quota_data["limit"] == AI_DAILY_QUOTA_LIMIT
 
 
 def test_weekly_journal():
@@ -493,6 +493,55 @@ def test_analyze_submission_quota_exceeded(mock_quota_check):
     assert "limit reached" in data["explanation"].lower()
 
 
+def test_quota_concurrency_at_boundary():
+    from concurrent.futures import ThreadPoolExecutor
+    from fastapi import HTTPException
+    
+    db = SessionLocal()
+    today_str = get_utc_now().strftime("%Y-%m-%d")
+    key = f"ai_limit_{today_str}"
+    db.query(UserConfig).filter(UserConfig.key == key).delete()
+    
+    starting_used = AI_DAILY_QUOTA_LIMIT - 1
+    config_row = UserConfig(key=key, value=str(starting_used))
+    db.add(config_row)
+    db.commit()
+    db.close()
+    
+    results = []
+    
+    def run_increment():
+        thread_db = SessionLocal()
+        try:
+            check_and_increment_ai_quota(thread_db)
+            results.append("success")
+        except HTTPException as e:
+            if e.status_code == 429:
+                results.append("quota_exceeded")
+            else:
+                results.append(f"error_{e.status_code}")
+        except Exception as e:
+            results.append(f"exception_{str(e)}")
+        finally:
+            thread_db.close()
+            
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(run_increment) for _ in range(10)]
+        for f in futures:
+            f.result()
+            
+    successes = [r for r in results if r == "success"]
+    exceeded = [r for r in results if r == "quota_exceeded"]
+    
+    assert len(successes) == 1, f"Expected exactly 1 success, got {len(successes)}. Results: {results}"
+    assert len(exceeded) == 9, f"Expected 9 quota exclusions, got {len(exceeded)}. Results: {results}"
+    
+    db = SessionLocal()
+    final_row = db.query(UserConfig).filter(UserConfig.key == key).first()
+    assert int(final_row.value) == AI_DAILY_QUOTA_LIMIT
+    db.close()
+
+
 if __name__ == "__main__":
     print("Starting backend tests...")
     test_db_setup()
@@ -516,5 +565,6 @@ if __name__ == "__main__":
     test_mock_interview()
     test_weekly_journal()
     test_analyze_submission_quota_exceeded()
+    test_quota_concurrency_at_boundary()
     print("All backend tests passed successfully!")
 

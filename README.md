@@ -98,6 +98,10 @@ python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
 
+# Configuration (Optional)
+# Create or modify the .env file inside the `backend/` directory to customize the daily AI limit:
+# AI_DAILY_QUOTA_LIMIT=15
+
 # Start backend server
 powershell ./run_backend.ps1
 # Or manually:
