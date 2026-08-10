@@ -27,6 +27,12 @@ export default function App() {
   const [askResults, setAskResults] = useState([]);
   const [diagnosisResult, setDiagnosisResult] = useState(null);
 
+  // Mock Company Setup modal states
+  const [showMockCompanyModal, setShowMockCompanyModal] = useState(false);
+  const [mockCompanyChoice, setMockCompanyChoice] = useState('');
+  const [mockFocusNote, setMockFocusNote] = useState('');
+  const [companyMetadata, setCompanyMetadata] = useState({});
+
   const getBadgeEmoji = (badge) => {
     switch (badge) {
       case 'Bronze': return '🥉';
@@ -89,7 +95,35 @@ export default function App() {
         setActiveTab('mastery');
         if (!res.data.approach_submitted && window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
+        } else if (res.data.approach_submitted && window.dsaTutor?.setEditorReadOnly) {
+          window.dsaTutor.setEditorReadOnly(false);
         }
+
+        // Redirect if not on the correct problem page
+        const urlMatch = window.location.href.match(/problems\/([^/]+)/);
+        const currentSlug = urlMatch ? urlMatch[1] : '';
+        if (res.data.problem_url && currentSlug !== res.data.problem_id) {
+          window.location.href = res.data.problem_url;
+        } else {
+          // Clear editor since it's a mock session and we don't want previous answers seen!
+          let attempts = 0;
+          const clearInt = setInterval(() => {
+            if (window.dsaTutor?.resetEditor) {
+              window.dsaTutor.resetEditor();
+              attempts++;
+              if (attempts > 5) clearInterval(clearInt);
+            }
+          }, 800);
+        }
+      }
+    });
+  };
+
+  const switchMockQuestion = (targetIndex) => {
+    if (!mockSession) return;
+    chrome.runtime.sendMessage({ action: 'mock_switch', payload: { session_id: mockSession.session_id, target_index: targetIndex } }, (res) => {
+      if (res && res.success) {
+        fetchActiveMock();
       }
     });
   };
@@ -145,6 +179,12 @@ export default function App() {
   const fetchCompanies = () => {
     chrome.runtime.sendMessage({ action: 'get_companies' }, (res) => {
       if (res && res.success) setCompanies(res.data || []);
+    });
+  };
+
+  const fetchCompanyMetadata = () => {
+    chrome.runtime.sendMessage({ action: 'get_company_metadata' }, (res) => {
+      if (res && res.success) setCompanyMetadata(res.data || {});
     });
   };
 
@@ -222,9 +262,10 @@ export default function App() {
     });
   };
 
-  const startMockInterview = () => {
-    chrome.runtime.sendMessage({ action: 'mock_start', payload: { company: selectedCompany || null } }, (res) => {
-      if (res && res.success) {
+  const startMockInterview = (companyName) => {
+    const comp = companyName !== undefined ? companyName : selectedCompany;
+    chrome.runtime.sendMessage({ action: 'mock_start', payload: { company: comp || null } }, (res) => {
+      if (res && res.success && res.data) {
         setMockSession(res.data);
         setMockApproachSubmitted(false);
         setMockTimerSeconds(res.data.time_limit_seconds || 2700);
@@ -234,7 +275,21 @@ export default function App() {
           window.dsaTutor.setEditorReadOnly(true);
         }
         if (res.data.problem_url) {
-          window.location.href = res.data.problem_url;
+          const urlMatch = window.location.href.match(/problems\/([^/]+)/);
+          const currentSlug = urlMatch ? urlMatch[1] : '';
+          if (currentSlug !== res.data.problem_id) {
+            window.location.href = res.data.problem_url;
+          } else {
+            // Already on the page, just clear editor immediately
+            let attempts = 0;
+            const clearInt = setInterval(() => {
+              if (window.dsaTutor?.resetEditor) {
+                window.dsaTutor.resetEditor();
+                attempts++;
+                if (attempts > 5) clearInterval(clearInt);
+              }
+            }, 800);
+          }
         }
       }
     });
@@ -550,6 +605,7 @@ export default function App() {
     fetchAnalysis();
     fetchStreak();
     fetchCompanies();
+    fetchCompanyMetadata();
     fetchWeakPairs();
     fetchActiveTest();
     fetchAiQuota();
@@ -648,6 +704,67 @@ export default function App() {
 
   return (
     <div id="dsa-tutor-panel-container">
+      {showMockCompanyModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h4 style={{ margin: '0 0 12px 0', color: '#f4f4f5', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
+              🏢 Mock Interview Setup
+            </h4>
+            <p style={{ margin: '0 0 14px 0', fontSize: '11px', color: '#a1a1aa', lineHeight: '1.4' }}>
+              Select a target company for your mock interview. We will select relevant questions and fetch custom preparation notes.
+            </p>
+            
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '11px', color: '#71717a', marginBottom: '6px' }}>Target Company:</label>
+              <select
+                value={mockCompanyChoice}
+                onChange={(e) => {
+                  setMockCompanyChoice(e.target.value);
+                  const note = companyMetadata[e.target.value] || "";
+                  setMockFocusNote(note);
+                }}
+                style={{ width: '100%', background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', padding: '6px', fontSize: '12px' }}
+              >
+                <option value="">Random / General (No Company)</option>
+                {companies.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {mockFocusNote && (
+              <div className="mock-focus-note-box" style={{ background: '#f59e0b11', borderLeft: '3px solid #f59e0b', padding: '8px', borderRadius: '4px', marginBottom: '14px', fontSize: '11px', color: '#fcd34d', lineHeight: '1.4' }}>
+                💡 <strong>Round Proxy Note:</strong> {mockFocusNote}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                className="coach-btn secondary"
+                onClick={() => {
+                  setShowMockCompanyModal(false);
+                  setMockCompanyChoice('');
+                  setMockFocusNote('');
+                }}
+                style={{ background: '#27272a', border: '1px solid #3f3f46', color: '#a1a1aa', padding: '4px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                className="coach-btn"
+                onClick={() => {
+                  setShowMockCompanyModal(false);
+                  startMockInterview(mockCompanyChoice);
+                  setMockCompanyChoice('');
+                  setMockFocusNote('');
+                }}
+                style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer' }}
+              >
+                Start Interview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="tutor-header">
         <h3 className="tutor-title">
@@ -667,7 +784,7 @@ export default function App() {
           <button
             onClick={() => {
               if (!isMockMode) {
-                startMockInterview();
+                setShowMockCompanyModal(true);
               } else {
                 setIsMockMode(false);
                 if (window.dsaTutor?.setEditorReadOnly) {
@@ -686,7 +803,7 @@ export default function App() {
               fontWeight: '500'
             }}
           >
-            {isMockMode ? '⏱ Mocking' : 'Practice'}
+            {isMockMode ? '⏱ Mocking' : 'Mock Interview'}
           </button>
 
           <button className="close-btn" onClick={() => setIsOpen(false)} title="Close">
@@ -756,6 +873,45 @@ export default function App() {
                 {Math.floor(mockTimerSeconds / 60)}:{String(mockTimerSeconds % 60).padStart(2, '0')}
               </span>
             </div>
+
+            {mockSession.problem_ids && mockSession.problem_ids.length > 0 && (
+              <div style={{ display: 'flex', gap: '4px', margin: '8px 0 6px 0', borderBottom: '1px solid #ef444422', paddingBottom: '8px' }}>
+                {mockSession.problem_ids.map((pid, idx) => {
+                  const isCurrent = mockSession.current_question_index === idx;
+                  const difficultyClass = mockSession.difficulties[idx]?.toLowerCase() || 'medium';
+                  const titleShort = mockSession.problem_titles[idx] || `Q${idx + 1}`;
+                  return (
+                    <button
+                      key={pid}
+                      onClick={() => switchMockQuestion(idx)}
+                      style={{
+                        flex: 1,
+                        background: isCurrent ? '#ef444433' : '#18181b',
+                        color: isCurrent ? '#f4f4f5' : '#a1a1aa',
+                        border: `1px solid ${isCurrent ? '#ef444455' : '#27272a'}`,
+                        borderRadius: '4px',
+                        padding: '4px 6px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        fontWeight: isCurrent ? '600' : '400',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '2px',
+                        minWidth: 0
+                      }}
+                      title={titleShort}
+                    >
+                      <span style={{ fontSize: '9px', textTransform: 'uppercase', opacity: 0.8 }}>Q{idx + 1}</span>
+                      <span className={`difficulty-badge ${difficultyClass}`} style={{ fontSize: '8px', padding: '1px 3px', border: 'none', zoom: 0.9 }}>
+                        {mockSession.difficulties[idx]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div style={{ fontSize: '12px', marginTop: '6px', color: '#e4e4e7' }}>
               Problem: <strong>{mockSession.problem_title}</strong> ({mockSession.difficulty})
             </div>
@@ -939,18 +1095,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {data.level < 5 && data.next_questions && data.next_questions.length > 0 && (
-                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed #27272a' }}>
-                        <div style={{ fontSize: '10px', color: '#71717a', marginBottom: '2px' }}>💡 Practice interview questions:</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                          {data.next_questions.map(q => (
-                            <a key={q.id} href={q.url} target="_blank" rel="noreferrer" className="badge-quest-link">
-                              🚀 {q.title} <span style={{ fontSize: '9px', color: '#71717a' }}>({q.difficulty})</span>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+
                   </div>
                 );
               })
@@ -992,11 +1137,11 @@ export default function App() {
                   onChange={(e) => setUserExplanationInput(e.target.value)}
                   style={{ marginTop: '6px', fontSize: '12px' }}
                 />
-                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                  <button className="coach-btn" style={{ flex: 1 }} onClick={runExplainBackCheck}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+                  <button className="coach-btn" style={{ width: '100%', padding: '6px 12px', fontSize: '12px' }} onClick={runExplainBackCheck}>
                     Verify Explanation
                   </button>
-                  <button className="coach-btn secondary" style={{ flex: 'none' }} onClick={() => setShowExplainBack(false)}>
+                  <button className="coach-btn secondary" style={{ width: '100%', padding: '6px 12px', fontSize: '11px' }} onClick={() => setShowExplainBack(false)}>
                     Skip
                   </button>
                 </div>

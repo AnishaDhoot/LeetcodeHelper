@@ -196,6 +196,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "get_company_metadata") {
+    backendFetch("/companies/metadata")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === "get_reviews_count") {
     backendFetch("/reviews/count")
       .then((data) => {
@@ -347,6 +354,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Mock Interview actions ---
   if (request.action === "mock_start") {
     backendFetch("/mock-interview/start", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_switch") {
+    backendFetch("/mock-interview/switch", { method: "POST", body: request.payload })
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;

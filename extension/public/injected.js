@@ -82,6 +82,41 @@ window.addEventListener("message", (event) => {
       console.error("[DSA Tutor Injected] Error setting readOnly:", e);
     }
   }
+
+  if (event.data && event.data.type === "RESET_EDITOR") {
+    try {
+      const models = window.monaco?.editor?.getModels();
+      if (models && models.length > 0) {
+        models.forEach(model => {
+          const uriStr = model.uri ? model.uri.toString() : "";
+          if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
+            model.setValue("");
+          }
+        });
+      }
+    } catch (e) {
+      console.error("[DSA Tutor Injected] Error resetting editor:", e);
+    }
+  }
 });
+
+// Continuously enforce readOnly state to override any LeetCode internal resets (e.g. language switches or re-renders)
+setInterval(() => {
+  if (window.__dsaTutorReadOnly && window.monaco && window.monaco.editor) {
+    const editors = window.monaco.editor.getEditors();
+    if (editors && editors.length > 0) {
+      editors.forEach(editor => {
+        try {
+          const isReadOnly = editor.getOptions ? editor.getOptions().get(window.monaco.editor.EditorOption.readOnly) : false;
+          if (!isReadOnly) {
+            editor.updateOptions({ readOnly: true });
+          }
+        } catch (e) {
+          editor.updateOptions({ readOnly: true });
+        }
+      });
+    }
+  }
+}, 300);
 
 console.log("[DSA Tutor Injected] Scraper script loaded in page context.");

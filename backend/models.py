@@ -142,7 +142,21 @@ class MockInterviewSession(Base):
     submitted_at = Column(DateTime, nullable=True)
     time_taken_seconds = Column(Integer, nullable=True)
 
+    # Added columns for 3-question mock interviews
+    problem_ids = Column(String, nullable=True)  # Comma-separated list of 3 problem IDs
+    current_question_index = Column(Integer, default=0, nullable=False)
+    approaches_submitted = Column(String, default="0,0,0", nullable=False)  # Comma-separated "0" or "1"
+    approaches_text = Column(Text, nullable=True)  # JSON-serialized list of approach texts
+
     problem = relationship("Problem")
+
+
+class CompanyMetadata(Base):
+    """Stores company-specific focus notes and metadata."""
+    __tablename__ = "company_metadata"
+
+    name = Column(String, primary_key=True, index=True)
+    focus_note = Column(Text, nullable=True)
 
 
 # ==========================================================
@@ -438,6 +452,15 @@ class MockStartResponse(BaseModel):
     difficulty: str
     topics: str
     time_limit_seconds: int
+    approach_submitted: bool = False
+    
+    # 3-problem support fields
+    current_question_index: int = 0
+    problem_ids: List[str] = []
+    problem_titles: List[str] = []
+    problem_urls: List[str] = []
+    difficulties: List[str] = []
+    approaches_submitted_list: List[bool] = []
 
 
 class MockApproachRequest(BaseModel):

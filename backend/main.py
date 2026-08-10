@@ -20,7 +20,7 @@ from collections import Counter
 from backend.database import get_db, engine, Base
 from backend.models import (
     Problem, Attempt, TopicMastery, UserConfig, SpacedRepetition, DailyActivity, MockInterviewSession,
-    BadgeTest, BadgeTestStartRequest, BadgeTestProblemSchema, BadgeTestSchema,
+    BadgeTest, BadgeTestStartRequest, BadgeTestProblemSchema, BadgeTestSchema, CompanyMetadata,
     SubmissionAnalyzeRequest, SubmissionAnalyzeResponse,
     ProblemRecommendResponse, TopicMasterySchema,
     CheckApproachRequest, CheckApproachResponse,
@@ -155,6 +155,22 @@ def _ensure_schema():
                 if col_name not in tm_cols:
                     with engine.begin() as conn:
                         conn.execute(text(ddl))
+
+    # -- mock_interview_sessions columns --
+    if "mock_interview_sessions" in table_names:
+        mock_cols = [c["name"] for c in insp.get_columns("mock_interview_sessions")]
+        if "problem_ids" not in mock_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN problem_ids TEXT"))
+        if "current_question_index" not in mock_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN current_question_index INTEGER DEFAULT 0 NOT NULL"))
+        if "approaches_submitted" not in mock_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN approaches_submitted TEXT DEFAULT '0,0,0' NOT NULL"))
+        if "approaches_text" not in mock_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN approaches_text TEXT"))
 
     # Auto-seed standard problem set and company tags if missing
     try:
@@ -474,14 +490,6 @@ def get_mastery(db: Session = Depends(get_db)):
     masteries = db.query(TopicMastery).all()
     result = []
     for m in masteries:
-        # Find up to 2 problems in this topic that are interview questions and not solved
-        unsolved_problems = db.query(Problem).filter(
-            Problem.topics.like(f"%{m.topic}%"),
-            Problem.companies.isnot(None),
-            Problem.companies != "",
-            Problem.is_solved == False
-        ).limit(2).all()
-
         result.append(TopicMasterySchema(
             topic=m.topic,
             mastery_score=m.mastery_score,
@@ -490,7 +498,7 @@ def get_mastery(db: Session = Depends(get_db)):
             rating=m.rating,
             level=m.level,
             badge=m.badge,
-            next_questions=[BadgeTestProblemSchema(id=p.id, title=p.title, url=p.url, difficulty=p.difficulty) for p in unsolved_problems],
+            next_questions=[],
             last_attempted=m.last_attempted,
             next_due_date=m.next_due_date
         ))
@@ -875,6 +883,13 @@ def get_companies(db: Session = Depends(get_db)):
     return sorted(list(companies))
 
 
+@app.get("/companies/metadata")
+def get_companies_metadata(db: Session = Depends(get_db)):
+    """Returns a dictionary mapping company names to their focus notes."""
+    meta = db.query(CompanyMetadata).all()
+    return {m.name: m.focus_note for m in meta}
+
+
 @app.get("/reviews/count")
 def get_reviews_count(db: Session = Depends(get_db)):
     """Returns count of active spaced repetition reviews due today (Tier 1.2)."""
@@ -985,38 +1000,110 @@ def reveal_complexity_critique(req: ComplexityRevealRequest, db: Session = Depen
     )
 
 
+class MockSwitchRequest(BaseModel):
+    session_id: int
+    target_index: int
+
+
 @app.post("/mock-interview/start", response_model=MockStartResponse)
 def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
-    """Starts a timed mock interview session (Tier 4.1)."""
+    """Starts a timed mock interview session with 3 questions (Tier 4.1)."""
+    # 1. Fetch recommendations for the company
     rec_res = get_next_problem(db, company=req.company)
     recs = rec_res.get("recommendations", [])
-    if not recs:
-        # Fallback to any problem
-        prob = db.query(Problem).first()
-    else:
-        prob_id = recs[0]["problem_id"]
-        prob = db.query(Problem).filter(Problem.id == prob_id).first()
+    
+    # 2. Find problems matching the company
+    company_problems = []
+    if req.company:
+        company_problems = db.query(Problem).filter(Problem.companies.like(f"%{req.company}%")).all()
+    
+    # 3. Mix recommendations, other company problems, and random problems to select exactly 3 problems
+    selected_probs = []
+    seen_ids = set()
+    
+    for r in recs:
+        if r["problem_id"] not in seen_ids:
+            seen_ids.add(r["problem_id"])
+            selected_probs.append(r["problem_id"])
+            if len(selected_probs) == 3:
+                break
+                
+    if len(selected_probs) < 3:
+        for p in company_problems:
+            if p.id not in seen_ids:
+                seen_ids.add(p.id)
+                selected_probs.append(p.id)
+                if len(selected_probs) == 3:
+                    break
+                    
+    # Fill up with random problems if not enough
+    if len(selected_probs) < 3:
+        all_probs = db.query(Problem).filter(Problem.topics != "Company Practice").all()
+        if not all_probs:
+            all_probs = db.query(Problem).all()
+        import random
+        random.shuffle(all_probs)
+        for p in all_probs:
+            if p.id not in seen_ids:
+                seen_ids.add(p.id)
+                selected_probs.append(p.id)
+                if len(selected_probs) == 3:
+                    break
 
-    if not prob:
-        raise HTTPException(status_code=404, detail="No suitable problem found for mock interview.")
+    # If database has extremely few problems (less than 3), duplicate them to fill up to 3
+    while len(selected_probs) < 3 and selected_probs:
+        selected_probs.append(selected_probs[0])
+        
+    if not selected_probs:
+        raise HTTPException(status_code=404, detail="No suitable problems found for mock interview.")
 
+    # 4. Resolve the problems' details
+    probs = [db.query(Problem).filter(Problem.id == pid).first() for pid in selected_probs]
+    probs = [p for p in probs if p is not None]
+    if not probs:
+        raise HTTPException(status_code=404, detail="Problems not found in database.")
+    
+    while len(probs) < 3:
+        probs.append(probs[0])
+        
+    problem_ids_str = ",".join([p.id for p in probs])
+    
+    # 5. Create MockInterviewSession record
+    import json
     session = MockInterviewSession(
-        problem_id=prob.id,
+        problem_id=probs[0].id,
         time_limit_seconds=req.time_limit_seconds,
-        company=req.company
+        company=req.company,
+        problem_ids=problem_ids_str,
+        current_question_index=0,
+        approaches_submitted="0,0,0",
+        approaches_text=json.dumps(["", "", ""])
     )
     db.add(session)
     db.commit()
     db.refresh(session)
 
+    # 6. Build list of metadata for 3 questions
+    problem_titles = [p.title for p in probs]
+    problem_urls = [p.url for p in probs]
+    difficulties = [p.difficulty for p in probs]
+    approaches_submitted_list = [False, False, False]
+
     return MockStartResponse(
         session_id=session.id,
-        problem_id=prob.id,
-        problem_title=prob.title,
-        problem_url=prob.url,
-        difficulty=prob.difficulty,
-        topics=prob.topics,
-        time_limit_seconds=session.time_limit_seconds
+        problem_id=probs[0].id,
+        problem_title=probs[0].title,
+        problem_url=probs[0].url,
+        difficulty=probs[0].difficulty,
+        topics=probs[0].topics or "",
+        time_limit_seconds=session.time_limit_seconds,
+        approach_submitted=False,
+        current_question_index=0,
+        problem_ids=[p.id for p in probs],
+        problem_titles=problem_titles,
+        problem_urls=problem_urls,
+        difficulties=difficulties,
+        approaches_submitted_list=approaches_submitted_list
     )
 
 
@@ -1031,19 +1118,62 @@ def get_active_mock_interview(db: Session = Depends(get_db)):
     elapsed = (get_utc_now() - session.start_time).total_seconds()
     if elapsed > session.time_limit_seconds:
         return None
+
+    # Parse multi-problem lists
+    problem_ids_str = session.problem_ids
+    if not problem_ids_str:
+        problem_ids_str = session.problem_id
         
-    prob = db.query(Problem).filter(Problem.id == session.problem_id).first()
+    problem_ids = [pid.strip() for pid in problem_ids_str.split(",") if pid.strip()]
+    probs = [db.query(Problem).filter(Problem.id == pid).first() for pid in problem_ids]
+    probs = [p for p in probs if p is not None]
+    
+    if not probs:
+        return None
+        
+    while len(probs) < 3:
+        probs.append(probs[0])
+        
+    cur_idx = session.current_question_index
+    if cur_idx >= len(probs):
+        cur_idx = 0
+        
+    cur_prob = probs[cur_idx]
+    
+    # Parse approaches submitted status
+    appr_sub = [False, False, False]
+    if session.approaches_submitted:
+        parts = session.approaches_submitted.split(",")
+        for idx, val in enumerate(parts):
+            if idx < len(appr_sub):
+                appr_sub[idx] = (val.strip() == "1")
+                
+    import json
+    appr_texts = ["", "", ""]
+    if session.approaches_text:
+        try:
+            appr_texts = json.loads(session.approaches_text)
+        except Exception:
+            pass
+
     return {
         "session_id": session.id,
-        "problem_id": session.problem_id,
-        "problem_title": prob.title if prob else session.problem_id,
-        "problem_url": prob.url if prob else "",
-        "difficulty": prob.difficulty if prob else "Medium",
-        "topics": prob.topics if prob else "",
+        "problem_id": cur_prob.id,
+        "problem_title": cur_prob.title,
+        "problem_url": cur_prob.url,
+        "difficulty": cur_prob.difficulty,
+        "topics": cur_prob.topics or "",
         "time_limit_seconds": session.time_limit_seconds,
         "start_time": session.start_time,
         "elapsed_seconds": int(elapsed),
-        "approach_submitted": session.approach_submitted_at is not None
+        "approach_submitted": appr_sub[cur_idx],
+        "current_question_index": cur_idx,
+        "problem_ids": [p.id for p in probs],
+        "problem_titles": [p.title for p in probs],
+        "problem_urls": [p.url for p in probs],
+        "difficulties": [p.difficulty for p in probs],
+        "approaches_submitted_list": appr_sub,
+        "approaches_text_list": appr_texts
     }
 
 
@@ -1054,9 +1184,59 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
     if not session:
         raise HTTPException(status_code=404, detail="Mock session not found.")
 
+    cur_idx = session.current_question_index
+    
+    appr_sub = ["0", "0", "0"]
+    if session.approaches_submitted:
+        parts = [p.strip() for p in session.approaches_submitted.split(",")]
+        for idx, val in enumerate(parts):
+            if idx < len(appr_sub):
+                appr_sub[idx] = val
+                
+    if cur_idx < len(appr_sub):
+        appr_sub[cur_idx] = "1"
+        
+    session.approaches_submitted = ",".join(appr_sub)
+
+    import json
+    appr_texts = ["", "", ""]
+    if session.approaches_text:
+        try:
+            appr_texts = json.loads(session.approaches_text)
+        except Exception:
+            pass
+            
+    while len(appr_texts) < 3:
+        appr_texts.append("")
+        
+    if cur_idx < len(appr_texts):
+        appr_texts[cur_idx] = req.approach_text
+        
+    session.approaches_text = json.dumps(appr_texts)
     session.approach_submitted_at = get_utc_now()
+    
     db.commit()
     return {"status": "approach_accepted", "session_id": session.id}
+
+
+@app.post("/mock-interview/switch")
+def switch_mock_question(req: MockSwitchRequest, db: Session = Depends(get_db)):
+    """Switches the active question index in the mock session (Tier 4.1)."""
+    session = db.query(MockInterviewSession).filter(MockInterviewSession.id == req.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Mock session not found.")
+        
+    if req.target_index < 0 or req.target_index >= 3:
+        raise HTTPException(status_code=400, detail="Invalid target index. Must be between 0 and 2.")
+        
+    session.current_question_index = req.target_index
+    
+    problem_ids = [pid.strip() for pid in session.problem_ids.split(",") if pid.strip()]
+    if req.target_index < len(problem_ids):
+        session.problem_id = problem_ids[req.target_index]
+        
+    db.commit()
+    return {"status": "question_switched", "session_id": session.id, "current_question_index": session.current_question_index}
 
 
 @app.post("/mock-interview/submit")
