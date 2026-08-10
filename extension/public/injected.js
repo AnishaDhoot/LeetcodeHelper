@@ -62,10 +62,10 @@ window.addEventListener("message", (event) => {
         }
       }
       
-      window.postMessage({ type: "CODE_VALUE", code: code }, "*");
+      window.postMessage({ type: "CODE_VALUE", code: code }, window.location.origin);
     } catch (e) {
       console.error("[DSA Tutor Injected] Error reading Monaco editor:", e);
-      window.postMessage({ type: "CODE_VALUE", code: "", error: e.message }, "*");
+      window.postMessage({ type: "CODE_VALUE", code: "", error: e.message }, window.location.origin);
     }
   }
 

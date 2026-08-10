@@ -64,7 +64,7 @@ const getCodeFromPage = (timeoutMs = 300) => {
       resolve(event.data.code || '');
     };
     window.addEventListener('message', onCodeReceived);
-    window.postMessage({ type: 'REQUEST_CODE' }, '*');
+    window.postMessage({ type: 'REQUEST_CODE' }, window.location.origin);
 
     // Fallback: resolve with empty string if injected.js never replies.
     setTimeout(() => {

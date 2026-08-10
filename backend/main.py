@@ -206,12 +206,19 @@ def _seed_elo_rating(solved_count: int) -> float:
 
 app = FastAPI(title="Autonomous DSA Tutor Agent Backend")
 
-# Enable CORS for the Chrome Extension and LeetCode page requests
+ALLOWED_ORIGINS = [
+    "https://leetcode.com",
+    "https://www.leetcode.com",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In development, we can allow all origins
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
