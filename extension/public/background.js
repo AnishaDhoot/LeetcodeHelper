@@ -388,6 +388,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "get_mock_report") {
+    backendFetch("/mock-interview/report")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // --- LeetCode history fetch (injects into LeetCode tab for same-origin access) ---
   if (request.action === "fetch_leetcode_history") {
     fetchSolvedProblemsViaTab()

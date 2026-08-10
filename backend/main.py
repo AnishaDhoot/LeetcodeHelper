@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -172,15 +173,14 @@ def _ensure_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN approaches_text TEXT"))
 
-    # Auto-seed standard problem set and company tags if missing/empty
+    # Check if database is empty and warn developer
     from backend.database import SessionLocal
     db_conn = SessionLocal()
     try:
         if db_conn.query(Problem).count() == 0:
-            print("[Info] Problems table empty, auto-seeding...")
-            seed_db()
+            print("[Warning] Problems table is empty! Please run 'python backend/seed.py' to seed the database.")
     except Exception as e:
-        print(f"Auto-seeding warning: {e}")
+        print(f"Database check warning: {e}")
     finally:
         db_conn.close()
 
@@ -1269,6 +1269,91 @@ def submit_mock_solution(req: MockSubmitRequest, db: Session = Depends(get_db)):
         hints_used=0
     )
     return analyze_submission(sub_req, db)
+
+
+@app.get("/mock-interview/report")
+def get_mock_interview_report(db: Session = Depends(get_db)):
+    """Generates a complete markdown report of all mock interview sessions."""
+    sessions = db.query(MockInterviewSession).order_by(MockInterviewSession.id.desc()).all()
+    
+    if not sessions:
+        return "# Mock Interview History Report\n\nNo mock interviews found. Start a mock interview to generate a report!"
+
+    total_sessions = len(sessions)
+    completed_sessions = sum(1 for s in sessions if s.submitted_at is not None)
+    
+    companies = set(s.company for s in sessions if s.company)
+    companies_str = ", ".join(sorted(list(companies))) if companies else "None"
+
+    md = [
+        "# Mock Interview History & Performance Report",
+        f"Generated on: {get_utc_now().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+        "",
+        "## Summary Stats",
+        f"- **Total Mock Sessions**: {total_sessions}",
+        f"- **Completed Sessions**: {completed_sessions}",
+        f"- **Target Companies**: {companies_str}",
+        "",
+        "---",
+        ""
+    ]
+
+    import json
+    for s in sessions:
+        company_tag = f" ({s.company})" if s.company else ""
+        status = "Completed" if s.submitted_at else "Active / Incomplete"
+        date_str = s.start_time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        md.append(f"## Session #{s.id}: Mock Interview{company_tag}")
+        md.append(f"- **Start Time**: {date_str}")
+        md.append(f"- **Status**: {status}")
+        md.append(f"- **Time Limit**: {s.time_limit_seconds // 60} minutes")
+        if s.submitted_at:
+            md.append(f"- **Time Taken**: {s.time_taken_seconds // 60} minutes {s.time_taken_seconds % 60} seconds")
+        md.append("")
+        
+        problem_ids_str = s.problem_ids or s.problem_id
+        problem_ids = [pid.strip() for pid in problem_ids_str.split(",") if pid.strip()]
+        
+        appr_sub = [False] * len(problem_ids)
+        if s.approaches_submitted:
+            parts = [p.strip() for p in s.approaches_submitted.split(",")]
+            for idx, val in enumerate(parts):
+                if idx < len(appr_sub):
+                    appr_sub[idx] = (val == "1")
+                    
+        appr_texts = [""] * len(problem_ids)
+        if s.approaches_text:
+            try:
+                appr_texts = json.loads(s.approaches_text)
+            except Exception:
+                pass
+                
+        md.append("### Questions Breakdown")
+        for idx, pid in enumerate(problem_ids):
+            prob = db.query(Problem).filter(Problem.id == pid).first()
+            title = prob.title if prob else pid
+            diff = prob.difficulty if prob else "Unknown"
+            url = prob.url if prob else f"https://leetcode.com/problems/{pid}/"
+            
+            md.append(f"#### Q{idx + 1}: {title} ({diff})")
+            md.append(f"- **LeetCode URL**: {url}")
+            
+            sub_status = "Submitted" if appr_sub[idx] else "Not Submitted"
+            md.append(f"- **Approach Gate**: {sub_status}")
+            
+            app_val = appr_texts[idx] if idx < len(appr_texts) else ""
+            if app_val:
+                md.append("- **Submitted Approach Explanation**:")
+                md.append(f"  > {app_val}")
+            else:
+                md.append("- **Submitted Approach Explanation**: *None*")
+            md.append("")
+        
+        md.append("---")
+        md.append("")
+
+    return "\n".join(md)
 
 
 @app.get("/journal/weekly", response_model=WeeklyJournalResponse)
