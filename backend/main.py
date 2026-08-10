@@ -172,11 +172,17 @@ def _ensure_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN approaches_text TEXT"))
 
-    # Auto-seed standard problem set and company tags if missing
+    # Auto-seed standard problem set and company tags if missing/empty
+    from backend.database import SessionLocal
+    db_conn = SessionLocal()
     try:
-        seed_db()
+        if db_conn.query(Problem).count() == 0:
+            print("[Info] Problems table empty, auto-seeding...")
+            seed_db()
     except Exception as e:
         print(f"Auto-seeding warning: {e}")
+    finally:
+        db_conn.close()
 
 
 _ensure_schema()
