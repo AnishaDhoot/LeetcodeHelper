@@ -227,7 +227,13 @@ def _record_daily_activity(db: Session, is_success: bool):
             act.problems_solved += 1
 
 
-def check_active_test_lock(db: Session):
+def check_active_test_lock(db: Session, is_contest: bool = False):
+    if is_contest:
+        raise HTTPException(
+            status_code=403,
+            detail="AI features and hints are strictly disabled during LeetCode contests to ensure fair play."
+        )
+
     # 1. Check Badge Test lock
     active = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     if active:
@@ -350,7 +356,7 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
     for t in topic_list:
         # Check badge test progress before modifying TopicMastery rating
         active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
-        if active_test and active_test.topic == t and is_success:
+        if active_test and (active_test.problem1_id == problem.id or active_test.problem2_id == problem.id) and is_success:
             updated = False
             if active_test.problem1_id == problem.id and not active_test.problem1_solved:
                 active_test.problem1_solved = True
@@ -367,6 +373,7 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
                     mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
                     if mastery:
                         mastery.level = active_test.level
+                        mastery.rating = max(mastery.rating, 800.0 + active_test.level * 240.0)
                     db.flush()
 
         update_mastery_on_submission(db, t, is_success=is_success, difficulty=problem.difficulty)
@@ -513,6 +520,13 @@ def get_mastery(db: Session = Depends(get_db)):
 
 @app.post("/badge-test/start", response_model=BadgeTestSchema)
 def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
+    # Check if there is already an active mock interview
+    mock = db.query(MockInterviewSession).filter(MockInterviewSession.submitted_at.is_(None)).order_by(MockInterviewSession.id.desc()).first()
+    if mock:
+        elapsed = (get_utc_now() - mock.start_time).total_seconds()
+        if elapsed <= mock.time_limit_seconds:
+            raise HTTPException(status_code=400, detail="Cannot start a Badge Test while a Mock Interview is active.")
+
     # Check if there is already an active test
     active = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     if active:
@@ -635,7 +649,7 @@ def health():
 @app.post("/approach/check", response_model=CheckApproachResponse)
 def check_approach(req: CheckApproachRequest, db: Session = Depends(get_db)):
     """Critiques the user's approach and suggests optimizations."""
-    check_active_test_lock(db)
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     result = generate_approach_critique(
         problem_title=req.problem_title,
@@ -655,7 +669,7 @@ def check_approach(req: CheckApproachRequest, db: Session = Depends(get_db)):
 @app.post("/hints/get", response_model=GetHintResponse)
 def get_hint(req: GetHintRequest, db: Session = Depends(get_db)):
     """Provides a progressive, conceptual hint without revealing the solution."""
-    check_active_test_lock(db)
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     result = generate_hint(
         problem_title=req.problem_title,
@@ -669,7 +683,7 @@ def get_hint(req: GetHintRequest, db: Session = Depends(get_db)):
 @app.post("/hints/reveal", response_model=HintRevealResponse)
 def reveal_hint(req: HintRevealRequest, db: Session = Depends(get_db)):
     """Provides a progressive, conceptual hint at the requested level (1, 2, or 3)."""
-    check_active_test_lock(db)
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     result = generate_levelled_hint(
         problem_title=req.problem_title,
@@ -688,7 +702,7 @@ def reveal_hint(req: HintRevealRequest, db: Session = Depends(get_db)):
 @app.post("/edge-cases/get", response_model=GetEdgeCasesResponse)
 def get_edge_cases(req: GetEdgeCasesRequest, db: Session = Depends(get_db)):
     """Identifies potential edge cases and critiques the problem constraints."""
-    check_active_test_lock(db)
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     result = analyze_edge_cases(
         problem_title=req.problem_title,
@@ -705,7 +719,7 @@ def get_edge_cases(req: GetEdgeCasesRequest, db: Session = Depends(get_db)):
 @app.post("/help/ask", response_model=AskHelpResponse)
 def ask_help(req: AskHelpRequest, db: Session = Depends(get_db)):
     """Answers a user's custom question about their code or the problem."""
-    check_active_test_lock(db)
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     result = answer_custom_question(
         problem_title=req.problem_title,
@@ -952,6 +966,7 @@ def get_time_trend(topic: str, db: Session = Depends(get_db)):
 @app.post("/submissions/explain-back", response_model=ExplainBackResponse)
 def explain_back(req: ExplainBackRequest, db: Session = Depends(get_db)):
     """Verifies user's self-explanation against their submitted code (Tier 3.2)."""
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     res = generate_explain_back_check(
         code=req.code,
@@ -967,6 +982,7 @@ def explain_back(req: ExplainBackRequest, db: Session = Depends(get_db)):
 @app.post("/critique/estimate")
 def store_complexity_estimate(req: ComplexityEstimateRequest, db: Session = Depends(get_db)):
     """Stores the user's complexity guess before revealing critique (Tier 3.3)."""
+    check_active_test_lock(db, is_contest=req.is_contest)
     import json
     key = f"estimate_{req.problem_id}"
     value = json.dumps({"time_complexity": req.time_complexity, "space_complexity": req.space_complexity})
@@ -983,6 +999,7 @@ def store_complexity_estimate(req: ComplexityEstimateRequest, db: Session = Depe
 @app.post("/critique/reveal", response_model=ComplexityRevealResponse)
 def reveal_complexity_critique(req: ComplexityRevealRequest, db: Session = Depends(get_db)):
     """Runs LLM approach critique and compares with stored self-estimate (Tier 3.3)."""
+    check_active_test_lock(db, is_contest=req.is_contest)
     check_and_increment_ai_quota(db)
     import json
     key = f"estimate_{req.problem_id}"
@@ -1014,6 +1031,10 @@ class MockSwitchRequest(BaseModel):
 @app.post("/mock-interview/start", response_model=MockStartResponse)
 def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
     """Starts a timed mock interview session with 3 questions (Tier 4.1)."""
+    active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if active_test:
+        raise HTTPException(status_code=400, detail="Cannot start a Mock Interview while a Badge Test is active.")
+
     # 1. Fetch recommendations for the company
     rec_res = get_next_problem(db, company=req.company)
     recs = rec_res.get("recommendations", [])

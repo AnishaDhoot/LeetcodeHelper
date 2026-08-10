@@ -400,6 +400,7 @@ def test_badge_test_flow():
     db = SessionLocal()
     try:
         db.query(BadgeTest).filter(BadgeTest.topic == "Arrays & Hashing").delete()
+        db.query(MockInterviewSession).delete()
         mastery = db.query(TopicMastery).filter(TopicMastery.topic == "Arrays & Hashing").first()
         if mastery:
             mastery.level = 0

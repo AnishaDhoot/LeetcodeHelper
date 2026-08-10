@@ -313,6 +313,7 @@ class CheckApproachRequest(BaseModel):
     code: str
     language: str
     constraints: Optional[List[str]] = None
+    is_contest: Optional[bool] = False
 
 
 class CheckApproachResponse(BaseModel):
@@ -331,6 +332,7 @@ class GetHintRequest(BaseModel):
     code: str
     language: str
     constraints: Optional[List[str]] = None
+    is_contest: Optional[bool] = False
 
 
 class GetHintResponse(BaseModel):
@@ -344,6 +346,7 @@ class HintRevealRequest(BaseModel):
     language: str
     level: int  # 1, 2, or 3
     constraints: Optional[List[str]] = None
+    is_contest: Optional[bool] = False
 
 
 class HintRevealResponse(BaseModel):
@@ -358,6 +361,7 @@ class GetEdgeCasesRequest(BaseModel):
     code: str
     language: str
     constraints: Optional[List[str]] = None
+    is_contest: Optional[bool] = False
 
 
 class GetEdgeCasesResponse(BaseModel):
@@ -372,6 +376,7 @@ class AskHelpRequest(BaseModel):
     language: str
     question: str
     constraints: Optional[List[str]] = None
+    is_contest: Optional[bool] = False
 
 
 class AskHelpResponse(BaseModel):
@@ -385,6 +390,7 @@ class ExplainBackRequest(BaseModel):
     code: str
     language: str
     user_explanation: str
+    is_contest: Optional[bool] = False
 
 
 class ExplainBackResponse(BaseModel):
@@ -398,6 +404,7 @@ class ComplexityEstimateRequest(BaseModel):
     problem_id: str
     time_complexity: str   # e.g. "O(N log N)"
     space_complexity: str  # e.g. "O(1)"
+    is_contest: Optional[bool] = False
 
 
 class ComplexityRevealRequest(BaseModel):
@@ -406,6 +413,7 @@ class ComplexityRevealRequest(BaseModel):
     code: str
     language: str
     constraints: Optional[List[str]] = None
+    is_contest: Optional[bool] = False
 
 
 class ComplexityRevealResponse(BaseModel):

@@ -10,6 +10,9 @@ const CATEGORY_MAP = {
 };
 
 export default function App() {
+  const isContestMode = typeof window !== 'undefined' && (window.location.href.includes('/contest/') || window.location.pathname.startsWith('/contest'));
+  const [autoOpenedReviews, setAutoOpenedReviews] = useState(false);
+
   const [isOpen, setIsOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('mastery');
   const [masteryData, setMasteryData] = useState([]);
@@ -325,10 +328,14 @@ export default function App() {
   };
 
   const runExplainBackCheck = async () => {
+    if (isContestMode) {
+      alert('AI features are disabled during LeetCode contests.');
+      return;
+    }
     if (!userExplanationInput.trim()) return;
     try {
       const ctx = await gatherContext(true);
-      const payload = { problem_id: ctx.problem_id, code: ctx.code, language: ctx.language, user_explanation: userExplanationInput.trim() };
+      const payload = { problem_id: ctx.problem_id, code: ctx.code, language: ctx.language, user_explanation: userExplanationInput.trim(), is_contest: isContestMode };
       chrome.runtime.sendMessage({ action: 'explain_back', payload }, (res) => {
         fetchAiQuota();
         if (res && res.success) {
@@ -341,6 +348,10 @@ export default function App() {
   };
 
   const runComplexityWithEstimate = async () => {
+    if (isContestMode) {
+      setCoachError('AI assistance is disabled during LeetCode contests to comply with fair play rules.');
+      return;
+    }
     if (!estimateSubmitted) {
       setShowEstimateForm(true);
       return;
@@ -349,7 +360,7 @@ export default function App() {
     setCoachLoading('approach');
     try {
       const ctx = await gatherContext(true);
-      const estPayload = { problem_id: ctx.problem_id, time_complexity: estimateTime, space_complexity: estimateSpace };
+      const estPayload = { problem_id: ctx.problem_id, time_complexity: estimateTime, space_complexity: estimateSpace, is_contest: isContestMode };
       chrome.runtime.sendMessage({ action: 'critique_estimate', payload: estPayload }, () => {
         chrome.runtime.sendMessage({ action: 'critique_reveal', payload: ctx }, (response) => {
           setCoachLoading(null);
@@ -386,12 +397,17 @@ export default function App() {
       problem_title: identity.problemTitle,
       code,
       language,
-      constraints
+      constraints,
+      is_contest: isContestMode
     };
   };
 
   // Generic Code Coach action runner.
   const runCoachAction = async (actionId, messageAction) => {
+    if (isContestMode) {
+      setCoachError('AI assistance is disabled during LeetCode contests to comply with fair play rules.');
+      return;
+    }
     setCoachError(null);
     setCoachLoading(actionId);
     try {
@@ -421,6 +437,10 @@ export default function App() {
 
   // Reveal next level of progressive hints.
   const revealNextHint = async () => {
+    if (isContestMode) {
+      setCoachError('AI assistance is disabled during LeetCode contests to comply with fair play rules.');
+      return;
+    }
     setCoachError(null);
     setCoachLoading('hint');
     try {
@@ -457,6 +477,10 @@ export default function App() {
 
   // Ask a free-form question about the current code.
   const runAskHelp = async () => {
+    if (isContestMode) {
+      setCoachError('AI assistance is disabled during LeetCode contests to comply with fair play rules.');
+      return;
+    }
     if (!askInput.trim()) return;
     const currentQ = askInput.trim();
     setCoachError(null);
@@ -701,6 +725,11 @@ export default function App() {
     chrome.runtime.sendMessage({ action: 'get_recommendation', payload: { company: comp || null } }, (response) => {
       if (response && response.success) {
         setRecommendation(response.data);
+        if (response.data?.reviews && response.data.reviews.length > 0 && !autoOpenedReviews) {
+          setAutoOpenedReviews(true);
+          setActiveTab('recommendation');
+          setIsOpen(true);
+        }
       } else {
         console.error('Failed to fetch recommendation:', response?.error);
       }
@@ -881,8 +910,103 @@ export default function App() {
 
       {/* Content Area */}
       <div className="tutor-content">
-        {/* Mock Interview Active Session Banner (Tier 4.1) */}
-        {isMockMode && mockSession && (
+        {activeTest ? (
+          <div className="test-mode-container">
+            <div className="test-mode-header">
+              <div className="test-mode-title">
+                🏆 Badge Test: {activeTest.topic} Level {activeTest.level}
+              </div>
+              <p style={{ fontSize: '11px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
+                Solve both problems in LeetCode to unlock the <strong>{activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'}</strong> badge. Hints and Code Coach assistance are locked.
+              </p>
+            </div>
+            
+            <div className="test-mode-problem-list">
+              <div className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`}>
+                <div>
+                  <a
+                    href={activeTest.problem1.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="badge-quest-link"
+                    style={{ fontSize: '13px', fontWeight: '600' }}
+                  >
+                    1. {activeTest.problem1.title}
+                  </a>
+                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
+                    Difficulty: {activeTest.problem1.difficulty}
+                  </div>
+                </div>
+                <div>
+                  {activeTest.problem1_solved ? (
+                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
+                  )}
+                </div>
+              </div>
+
+              <div className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`}>
+                <div>
+                  <a
+                    href={activeTest.problem2.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="badge-quest-link"
+                    style={{ fontSize: '13px', fontWeight: '600' }}
+                  >
+                    2. {activeTest.problem2.title}
+                  </a>
+                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
+                    Difficulty: {activeTest.problem2.difficulty}
+                  </div>
+                </div>
+                <div>
+                  {activeTest.problem2_solved ? (
+                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+              <button className="abandon-btn" onClick={abandonBadgeTest}>
+                Abandon Test
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Contest Mode Active Banner */}
+            {isContestMode && (
+              <div className="info-section" style={{ borderColor: '#ea580c88', background: '#ea580c1b', marginBottom: '14px' }}>
+                <div className="section-label" style={{ color: '#fb923c', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>🏆 Contest Mode Active</span>
+                  <span style={{ fontSize: '10px', background: '#ea580c44', color: '#ffedd5', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>FAIR PLAY LOCK</span>
+                </div>
+                <div className="section-content" style={{ fontSize: '11px', color: '#ffedd5', lineHeight: '1.4', marginTop: '4px' }}>
+                  AI assistance, hints, code coaching, and problem diagnostics are strictly disabled during LeetCode contests to ensure compliance with contest rules.
+                </div>
+              </div>
+            )}
+
+            {/* Review Today Prompt Banner */}
+            {recommendation?.reviews && recommendation.reviews.length > 0 && activeTab !== 'recommendation' && !activeTest && (
+              <div
+                onClick={() => setActiveTab('recommendation')}
+                style={{ background: '#f59e0b1b', border: '1px solid #f59e0b66', borderRadius: '6px', padding: '8px 10px', marginBottom: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <span style={{ fontSize: '11px', color: '#fbbf24', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  📅 <strong>{recommendation.reviews.length} question(s) due for review today!</strong>
+                </span>
+                <span style={{ fontSize: '10px', color: '#fcd34d', fontWeight: 'bold', textDecoration: 'underline' }}>Open Reviews →</span>
+              </div>
+            )}
+
+            {/* Mock Interview Active Session Banner (Tier 4.1) */}
+            {isMockMode && mockSession && (
           <div className="info-section" style={{ borderColor: '#ef444466', background: '#ef444415', marginBottom: '14px' }}>
             <div className="section-label" style={{ color: '#f87171', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>⏱ Mock Interview Mode</span>
@@ -958,7 +1082,7 @@ export default function App() {
         )}
 
         {/* TAB 1: MASTERY OVERVIEW */}
-        {activeTab === 'mastery' && (
+        {!activeTest && activeTab === 'mastery' && (
           <div>
             {/* Focus banner */}
             {focusTopic && (
@@ -972,82 +1096,6 @@ export default function App() {
                 </button>
               </div>
             )}
-
-            {/* Badge Test Mode view */}
-        {activeTest && (
-          <div className="test-mode-container">
-            <div className="test-mode-header">
-              <div className="test-mode-title">
-                🏆 Badge Test: {activeTest.topic} Level {activeTest.level}
-              </div>
-              <p style={{ fontSize: '11px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
-                Solve both problems in LeetCode to unlock the <strong>{activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'}</strong> badge. Hints and Code Coach assistance are locked.
-              </p>
-            </div>
-            
-            <div className="test-mode-problem-list">
-              <div className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`}>
-                <div>
-                  <a
-                    href={activeTest.problem1.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="badge-quest-link"
-                    style={{ fontSize: '13px', fontWeight: '600' }}
-                  >
-                    1. {activeTest.problem1.title}
-                  </a>
-                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                    Difficulty: {activeTest.problem1.difficulty}
-                  </div>
-                </div>
-                <div>
-                  {activeTest.problem1_solved ? (
-                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
-                  ) : (
-                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
-                  )}
-                </div>
-              </div>
-
-              <div className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`}>
-                <div>
-                  <a
-                    href={activeTest.problem2.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="badge-quest-link"
-                    style={{ fontSize: '13px', fontWeight: '600' }}
-                  >
-                    2. {activeTest.problem2.title}
-                  </a>
-                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                    Difficulty: {activeTest.problem2.difficulty}
-                  </div>
-                </div>
-                <div>
-                  {activeTest.problem2_solved ? (
-                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
-                  ) : (
-                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
-              <button className="abandon-btn" onClick={abandonBadgeTest}>
-                Abandon Test
-              </button>
-            </div>
-          </div>
-        )}
-          </div>
-        )}
-
-        {/* TAB 1: MASTERY OVERVIEW */}
-        {!activeTest && activeTab === 'mastery' && (
-          <div>
             {weakPairs && weakPairs.length > 0 && (
               <div className="info-section alt-section" style={{ marginBottom: '14px', borderLeftColor: '#fbbf24' }}>
                 <div className="section-label alt-label" style={{ color: '#fbbf24' }}>
@@ -1842,7 +1890,9 @@ export default function App() {
             )}
           </div>
         )}
-      </div>
+      </>
+    )}
+  </div>
 
       {/* Footer */}
       <div className="tutor-footer">
