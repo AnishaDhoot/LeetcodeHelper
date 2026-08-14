@@ -14,7 +14,7 @@ export default function App() {
   const [autoOpenedReviews, setAutoOpenedReviews] = useState(false);
 
   const [isOpen, setIsOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState('mastery');
+  const [activeTab, setActiveTab] = useState('coach');
   const [masteryData, setMasteryData] = useState([]);
   const [recommendation, setRecommendation] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -23,6 +23,7 @@ export default function App() {
 
   // Badge Test states
   const [activeTest, setActiveTest] = useState(null);
+  const [testTimerSeconds, setTestTimerSeconds] = useState(5400); // 1.5 hours default
 
   // Code Coach states (persistent per tool)
   const [approachResult, setApproachResult] = useState(null);
@@ -49,16 +50,23 @@ export default function App() {
 
   const fetchActiveTest = () => {
     chrome.runtime.sendMessage({ action: 'get_active_badge_test' }, (res) => {
-      if (res && res.success) {
+      if (res && res.success && res.data) {
         setActiveTest(res.data);
+        const timeLimit = res.data.time_limit_seconds || 5400;
+        const elapsed = res.data.elapsed_seconds || 0;
+        const remaining = timeLimit - elapsed;
+        setTestTimerSeconds(remaining > 0 ? remaining : 0);
+      } else {
+        setActiveTest(null);
       }
     });
   };
 
   const startBadgeTest = (topic) => {
     chrome.runtime.sendMessage({ action: 'start_badge_test', payload: { topic } }, (res) => {
-      if (res && res.success) {
+      if (res && res.success && res.data) {
         setActiveTest(res.data);
+        setTestTimerSeconds(res.data.time_limit_seconds || 5400);
         setActiveTab('test');
       } else {
         alert(res?.error || 'Failed to start Badge Test.');
@@ -147,8 +155,8 @@ export default function App() {
   // Backend health state
   const [backendOnline, setBackendOnline] = useState(null); // null=unknown, true/false
 
-  // Focus topic state
-  const [focusTopic, setFocusTopic] = useState(null);
+  // Focus topic state (up to 3 focus topics)
+  const [focusTopics, setFocusTopics] = useState([]);
 
   // Topic analysis state (loaded after sync or on mount)
   const [analysisData, setAnalysisData] = useState(null);
@@ -171,7 +179,7 @@ export default function App() {
   const [mockSession, setMockSession] = useState(null);
   const [mockApproachText, setMockApproachText] = useState('');
   const [mockApproachSubmitted, setMockApproachSubmitted] = useState(false);
-  const [mockTimerSeconds, setMockTimerSeconds] = useState(2700);
+  const [mockTimerSeconds, setMockTimerSeconds] = useState(7200);
 
   const fetchStreak = () => {
     chrome.runtime.sendMessage({ action: 'get_streak' }, (res) => {
@@ -315,6 +323,9 @@ export default function App() {
     });
   };
 
+  const [mockScorecard, setMockScorecard] = useState(null);
+  const [showScorecardModal, setShowScorecardModal] = useState(false);
+
   const submitMockApproach = () => {
     if (!mockApproachText.trim() || !mockSession) return;
     chrome.runtime.sendMessage({ action: 'mock_approach', payload: { session_id: mockSession.session_id, approach_text: mockApproachText } }, (res) => {
@@ -323,6 +334,24 @@ export default function App() {
         if (window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(false);
         }
+        fetchActiveMock(); // Refresh active mock to receive AI feedback
+      }
+    });
+  };
+
+  const finishMockInterview = () => {
+    if (!mockSession) return;
+    chrome.runtime.sendMessage({ action: 'mock_evaluate', payload: { session_id: mockSession.session_id } }, (res) => {
+      if (res && res.success && res.data) {
+        setMockScorecard(res.data);
+        setShowScorecardModal(true);
+      } else {
+        alert('Mock interview session finished!');
+      }
+      setIsMockMode(false);
+      setMockSession(null);
+      if (window.dsaTutor?.setEditorReadOnly) {
+        window.dsaTutor.setEditorReadOnly(false);
       }
     });
   };
@@ -551,16 +580,37 @@ export default function App() {
   const fetchFocus = () => {
     chrome.runtime.sendMessage({ action: 'get_focus' }, (response) => {
       if (response && response.success) {
-        setFocusTopic(response.data?.focus_topic || null);
+        const topics = response.data?.focus_topics || (response.data?.focus_topic ? response.data.focus_topic.split(',').map(s => s.trim()) : []);
+        setFocusTopics(topics);
       }
     });
   };
 
-  const setFocus = (topic) => {
-    chrome.runtime.sendMessage({ action: 'set_focus', payload: { topic: topic || '' } }, (response) => {
+  const toggleFocusTopic = (topic) => {
+    let updated = [...focusTopics];
+    if (updated.includes(topic)) {
+      updated = updated.filter(t => t !== topic);
+    } else {
+      if (updated.length >= 3) {
+        updated = [...updated.slice(1), topic];
+      } else {
+        updated.push(topic);
+      }
+    }
+    chrome.runtime.sendMessage({ action: 'set_focus', payload: { topics: updated } }, (response) => {
       if (response && response.success) {
-        setFocusTopic(response.data?.focus_topic || null);
-        fetchRecommendation(); // Refresh to pick up focus-based rec
+        const resTopics = response.data?.focus_topics || (response.data?.focus_topic ? response.data.focus_topic.split(',').map(s => s.trim()) : []);
+        setFocusTopics(resTopics);
+        fetchRecommendation();
+      }
+    });
+  };
+
+  const clearFocusTopics = () => {
+    chrome.runtime.sendMessage({ action: 'set_focus', payload: { topics: [] } }, (response) => {
+      if (response && response.success) {
+        setFocusTopics([]);
+        fetchRecommendation();
       }
     });
   };
@@ -606,6 +656,17 @@ export default function App() {
           setCurrentProblemId(identity.problemId);
           clearCurrentCoachState();
           fetchProblemDetails(identity.problemId);
+
+          // If active badge test is running, clear previous answers
+          if (activeTest && window.dsaTutor?.resetEditor) {
+            setTimeout(() => window.dsaTutor.resetEditor(), 500);
+          }
+
+          // If active mock interview is running and strategy is not submitted, lock & reset editor
+          if (isMockMode && mockSession && !mockApproachSubmitted) {
+            if (window.dsaTutor?.setEditorReadOnly) window.dsaTutor.setEditorReadOnly(true);
+            if (window.dsaTutor?.resetEditor) setTimeout(() => window.dsaTutor.resetEditor(), 500);
+          }
         }
       } catch (e) {
         // Ignore
@@ -636,6 +697,24 @@ export default function App() {
     }, 1000);
     return () => clearInterval(t);
   }, [isMockMode, mockSession]);
+
+  // Active Badge Test countdown timer
+  useEffect(() => {
+    if (!activeTest) return;
+    const t = setInterval(() => {
+      setTestTimerSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(t);
+          alert('⏱ Badge test time expired!');
+          setActiveTest(null);
+          fetchMastery();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [activeTest]);
 
   // Fetch data on mount
   useEffect(() => {
@@ -864,16 +943,6 @@ export default function App() {
       {/* Tabs Menu */}
       {!activeTest && (
         <div className="tabs-container">
-          <button
-            className={`tab-btn ${activeTab === 'mastery' ? 'active' : ''}`}
-            onClick={() => setActiveTab('mastery')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 3v18h18" />
-              <path d="m19 9-5 5-4-4-3 3" />
-            </svg>
-            Mastery
-          </button>
           {!isMockMode && (
             <button
               className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
@@ -896,6 +965,16 @@ export default function App() {
             Next
           </button>
           <button
+            className={`tab-btn ${activeTab === 'mastery' ? 'active' : ''}`}
+            onClick={() => setActiveTab('mastery')}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 3v18h18" />
+              <path d="m19 9-5 5-4-4-3 3" />
+            </svg>
+            Mastery
+          </button>
+          <button
             className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
             onClick={() => setActiveTab('history')}
           >
@@ -912,13 +991,18 @@ export default function App() {
       <div className="tutor-content">
         {activeTest ? (
           <div className="test-mode-container">
-            <div className="test-mode-header">
-              <div className="test-mode-title">
-                🏆 Badge Test: {activeTest.topic} Level {activeTest.level}
+            <div className="test-mode-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="test-mode-title">
+                  🏆 Badge Test: {activeTest.topic} Level {activeTest.level}
+                </div>
+                <p style={{ fontSize: '11px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
+                  Solve both problems in LeetCode to unlock the <strong>{activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'}</strong> badge. Hints and Code Coach assistance are locked.
+                </p>
               </div>
-              <p style={{ fontSize: '11px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
-                Solve both problems in LeetCode to unlock the <strong>{activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'}</strong> badge. Hints and Code Coach assistance are locked.
-              </p>
+              <div style={{ background: '#27272a', padding: '4px 8px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', color: '#fbbf24', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                ⏱ {Math.floor(testTimerSeconds / 3600)}h {String(Math.floor((testTimerSeconds % 3600) / 60)).padStart(2, '0')}m {String(testTimerSeconds % 60).padStart(2, '0')}s
+              </div>
             </div>
             
             <div className="test-mode-problem-list">
@@ -1007,95 +1091,117 @@ export default function App() {
 
             {/* Mock Interview Active Session Banner (Tier 4.1) */}
             {isMockMode && mockSession && (
-          <div className="info-section" style={{ borderColor: '#ef444466', background: '#ef444415', marginBottom: '14px' }}>
-            <div className="section-label" style={{ color: '#f87171', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>⏱ Mock Interview Mode</span>
-              <span style={{ fontFamily: 'monospace', fontSize: '13px', background: '#27272a', padding: '2px 6px', borderRadius: '4px', color: '#fff' }}>
-                {Math.floor(mockTimerSeconds / 60)}:{String(mockTimerSeconds % 60).padStart(2, '0')}
-              </span>
-            </div>
-
-            {mockSession.problem_ids && mockSession.problem_ids.length > 0 && (
-              <div style={{ display: 'flex', gap: '4px', margin: '8px 0 6px 0', borderBottom: '1px solid #ef444422', paddingBottom: '8px' }}>
-                {mockSession.problem_ids.map((pid, idx) => {
-                  const isCurrent = mockSession.current_question_index === idx;
-                  const difficultyClass = mockSession.difficulties[idx]?.toLowerCase() || 'medium';
-                  const titleShort = mockSession.problem_titles[idx] || `Q${idx + 1}`;
-                  return (
+              <div className="info-section" style={{ borderColor: '#ef444466', background: '#ef444415', marginBottom: '14px' }}>
+                <div className="section-label" style={{ color: '#f87171', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>⏱ Mock Interview ({mockSession.company || 'General'})</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: '13px', background: '#27272a', padding: '2px 6px', borderRadius: '4px', color: '#fff' }}>
+                      {Math.floor(mockTimerSeconds / 60)}:{String(mockTimerSeconds % 60).padStart(2, '0')}
+                    </span>
                     <button
-                      key={pid}
-                      onClick={() => switchMockQuestion(idx)}
-                      style={{
-                        flex: 1,
-                        background: isCurrent ? '#ef444433' : '#18181b',
-                        color: isCurrent ? '#f4f4f5' : '#a1a1aa',
-                        border: `1px solid ${isCurrent ? '#ef444455' : '#27272a'}`,
-                        borderRadius: '4px',
-                        padding: '4px 6px',
-                        fontSize: '11px',
-                        cursor: 'pointer',
-                        fontWeight: isCurrent ? '600' : '400',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '2px',
-                        minWidth: 0
-                      }}
-                      title={titleShort}
+                      onClick={finishMockInterview}
+                      style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '10px', fontWeight: '600', cursor: 'pointer' }}
                     >
-                      <span style={{ fontSize: '9px', textTransform: 'uppercase', opacity: 0.8 }}>Q{idx + 1}</span>
-                      <span className={`difficulty-badge ${difficultyClass}`} style={{ fontSize: '8px', padding: '1px 3px', border: 'none', zoom: 0.9 }}>
-                        {mockSession.difficulties[idx]}
-                      </span>
+                      Finish & Score
                     </button>
-                  );
-                })}
+                  </div>
+                </div>
+
+                {mockSession.problem_ids && mockSession.problem_ids.length > 0 && (
+                  <div style={{ display: 'flex', gap: '4px', margin: '8px 0 6px 0', borderBottom: '1px solid #ef444422', paddingBottom: '8px' }}>
+                    {mockSession.problem_ids.map((pid, idx) => {
+                      const isCurrent = mockSession.current_question_index === idx;
+                      const difficultyClass = mockSession.difficulties[idx]?.toLowerCase() || 'medium';
+                      const titleShort = mockSession.problem_titles[idx] || `Q${idx + 1}`;
+                      const isSubmitted = mockSession.approaches_submitted_list ? mockSession.approaches_submitted_list[idx] : false;
+                      return (
+                        <button
+                          key={pid}
+                          onClick={() => switchMockQuestion(idx)}
+                          style={{
+                            flex: 1,
+                            background: isCurrent ? '#ef444433' : '#18181b',
+                            color: isCurrent ? '#f4f4f5' : '#a1a1aa',
+                            border: `1px solid ${isCurrent ? '#ef444455' : '#27272a'}`,
+                            borderRadius: '4px',
+                            padding: '4px 6px',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            fontWeight: isCurrent ? '600' : '400',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '2px',
+                            minWidth: 0
+                          }}
+                          title={titleShort}
+                        >
+                          <span style={{ fontSize: '9px', textTransform: 'uppercase', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '2px' }}>
+                            Q{idx + 1} {isSubmitted ? '✓' : '🔒'}
+                          </span>
+                          <span className={`difficulty-badge ${difficultyClass}`} style={{ fontSize: '8px', padding: '1px 3px', border: 'none', zoom: 0.9 }}>
+                            {mockSession.difficulties[idx]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div style={{ fontSize: '12px', marginTop: '6px', color: '#e4e4e7' }}>
+                  Problem: <strong>{mockSession.problem_title}</strong> ({mockSession.difficulty})
+                </div>
+
+                {!mockApproachSubmitted ? (
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px', fontWeight: '500' }}>
+                      🔒 Code Editor Locked! Write your algorithm approach & time/space complexity to unlock:
+                    </div>
+                    <textarea
+                      className="ask-input"
+                      rows={3}
+                      placeholder="e.g. Using Two Pointers algorithm. Time complexity O(N), Space complexity O(1)..."
+                      value={mockApproachText}
+                      onChange={(e) => setMockApproachText(e.target.value)}
+                      style={{ fontSize: '12px' }}
+                    />
+                    <button className="coach-btn" style={{ marginTop: '6px', width: '100%' }} onClick={submitMockApproach}>
+                      Submit Approach to AI Interviewer & Unlock Editor
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ fontSize: '11px', color: '#4ade80', marginBottom: '4px', fontWeight: '600' }}>
+                      ✓ Strategy Approved & Code Editor Unlocked!
+                    </div>
+                    {mockSession.ai_feedback_list && mockSession.ai_feedback_list[mockSession.current_question_index] && (
+                      <div style={{ background: '#18181b', border: '1px solid #27272a', borderLeft: '3px solid #3b82f6', borderRadius: '4px', padding: '8px', fontSize: '11px', color: '#d4d4d8', lineHeight: '1.4', marginTop: '6px' }}>
+                        🤖 <strong>AI Interviewer:</strong> {mockSession.ai_feedback_list[mockSession.current_question_index]}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
-            <div style={{ fontSize: '12px', marginTop: '6px', color: '#e4e4e7' }}>
-              Problem: <strong>{mockSession.problem_title}</strong> ({mockSession.difficulty})
-            </div>
-            {!mockApproachSubmitted ? (
-              <div style={{ marginTop: '8px' }}>
-                <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px' }}>
-                  🔒 Code Editor Locked! Write your approach first to unlock:
-                </div>
-                <textarea
-                  className="ask-input"
-                  rows={2}
-                  placeholder="Outline your algorithm approach, data structures, and edge cases..."
-                  value={mockApproachText}
-                  onChange={(e) => setMockApproachText(e.target.value)}
-                  style={{ fontSize: '12px' }}
-                />
-                <button className="coach-btn" style={{ marginTop: '6px', width: '100%' }} onClick={submitMockApproach}>
-                  Submit Approach & Unlock Editor
-                </button>
-              </div>
-            ) : (
-              <div style={{ fontSize: '11px', color: '#4ade80', marginTop: '6px' }}>
-                ✓ Approach accepted! Code editor unlocked. Solve and submit on LeetCode before time expires.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 1: MASTERY OVERVIEW */}
-        {!activeTest && activeTab === 'mastery' && (
-          <div>
-            {/* Focus banner */}
-            {focusTopic && (
-              <div className="focus-banner">
-                <div className="focus-banner-text">
-                  <span className="focus-icon">◎</span>
-                  <span>Focus: <strong style={{color:'#d4d4d8'}}>{focusTopic}</strong></span>
-                </div>
-                <button className="focus-change-btn" onClick={() => setFocus('')}>
-                  Clear
-                </button>
-              </div>
-            )}
+            {/* TAB 1: MASTERY OVERVIEW */}
+            {!activeTest && activeTab === 'mastery' && (
+              <div>
+                {/* Focus banner */}
+                {focusTopics && focusTopics.length > 0 && (
+                  <div className="focus-banner">
+                    <div className="focus-banner-text">
+                      <span className="focus-icon">◎</span>
+                      <span>
+                        Focus ({focusTopics.length}/3):{' '}
+                        <strong style={{ color: '#d4d4d8' }}>{focusTopics.join(', ')}</strong>
+                      </span>
+                    </div>
+                    <button className="focus-change-btn" onClick={clearFocusTopics}>
+                      Clear All
+                    </button>
+                  </div>
+                )}
             {weakPairs && weakPairs.length > 0 && (
               <div className="info-section alt-section" style={{ marginBottom: '14px', borderLeftColor: '#fbbf24' }}>
                 <div className="section-label alt-label" style={{ color: '#fbbf24' }}>
@@ -1119,7 +1225,7 @@ export default function App() {
                 return (
                   <div
                     key={data.topic}
-                    className={`mastery-card ${data.topic === focusTopic ? 'mastery-card-focus' : ''}`}
+                    className={`mastery-card ${focusTopics.includes(data.topic) ? 'mastery-card-focus' : ''}`}
                     data-level={levelColor}
                   >
                     <div className="mastery-header">
@@ -1151,11 +1257,11 @@ export default function App() {
                           <span style={{ color: '#22c55e', fontWeight: '600', fontSize: '11px' }}>🏆 Max Tier!</span>
                         )}
                         <button
-                          className={`focus-pick-btn ${data.topic === focusTopic ? 'active' : ''}`}
-                          onClick={() => setFocus(data.topic)}
-                          title={data.topic === focusTopic ? 'Remove focus' : 'Set as focus topic'}
+                          className={`focus-pick-btn ${focusTopics.includes(data.topic) ? 'active' : ''}`}
+                          onClick={() => toggleFocusTopic(data.topic)}
+                          title={focusTopics.includes(data.topic) ? 'Remove focus' : 'Set as focus topic (max 3)'}
                         >
-                          {data.topic === focusTopic ? 'Focused' : 'Focus'}
+                          {focusTopics.includes(data.topic) ? 'Focused' : 'Focus'}
                         </button>
                       </div>
                     </div>
@@ -1873,12 +1979,12 @@ export default function App() {
                               {t.badge !== 'None' ? `${getBadgeEmoji(t.badge)} ${t.badge}` : '🔒 Locked'}
                             </span>
                             <button
-                              className="focus-pick-btn"
-                              onClick={() => setFocus(t.topic)}
-                              title="Focus on this topic"
+                              className={`focus-pick-btn ${focusTopics.includes(t.topic) ? 'active' : ''}`}
+                              onClick={() => toggleFocusTopic(t.topic)}
+                              title={focusTopics.includes(t.topic) ? 'Remove focus' : 'Set as focus topic (max 3)'}
                             >
                               <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                              Focus
+                              {focusTopics.includes(t.topic) ? 'Focused' : 'Focus'}
                             </button>
                           </div>
                         </div>
@@ -1893,6 +1999,67 @@ export default function App() {
       </>
     )}
   </div>
+
+      {/* Scorecard Modal */}
+      {showScorecardModal && mockScorecard && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '400px', padding: '18px', color: '#f4f4f5', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #27272a', paddingBottom: '10px', marginBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                🏆 Mock Interview Scorecard
+              </h3>
+              <button onClick={() => setShowScorecardModal(false)} style={{ background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+
+            <div style={{ textAlign: 'center', marginBottom: '14px', background: '#18181b', padding: '10px', borderRadius: '8px', border: '1px solid #27272a' }}>
+              <div style={{ fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Hiring Verdict</div>
+              <div style={{ fontSize: '18px', fontWeight: '800', color: mockScorecard.verdict?.includes('Hire') ? '#4ade80' : '#fbbf24', marginTop: '2px' }}>
+                {mockScorecard.verdict || 'Hire'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#d4d4d8', marginTop: '4px', lineHeight: '1.4' }}>
+                {mockScorecard.overall_summary}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+              <div style={{ flex: 1, background: '#18181b', padding: '6px', borderRadius: '6px', textAlign: 'center', fontSize: '10px' }}>
+                <div style={{ color: '#a1a1aa' }}>Strategy</div>
+                <div style={{ fontWeight: '700', color: '#fbbf24', fontSize: '13px', marginTop: '2px' }}>{'⭐'.repeat(mockScorecard.strategy_score || 4)}</div>
+              </div>
+              <div style={{ flex: 1, background: '#18181b', padding: '6px', borderRadius: '6px', textAlign: 'center', fontSize: '10px' }}>
+                <div style={{ color: '#a1a1aa' }}>Code Quality</div>
+                <div style={{ fontWeight: '700', color: '#60a5fa', fontSize: '13px', marginTop: '2px' }}>{'⭐'.repeat(mockScorecard.code_quality_score || 4)}</div>
+              </div>
+              <div style={{ flex: 1, background: '#18181b', padding: '6px', borderRadius: '6px', textAlign: 'center', fontSize: '10px' }}>
+                <div style={{ color: '#a1a1aa' }}>Speed</div>
+                <div style={{ fontWeight: '700', color: '#4ade80', fontSize: '13px', marginTop: '2px' }}>{'⭐'.repeat(mockScorecard.time_management_score || 4)}</div>
+              </div>
+            </div>
+
+            {mockScorecard.strengths && mockScorecard.strengths.length > 0 && (
+              <div style={{ marginBottom: '10px', fontSize: '11px' }}>
+                <strong style={{ color: '#4ade80' }}>Key Strengths:</strong>
+                <ul style={{ margin: '4px 0 0 14px', padding: 0, color: '#a1a1aa', lineHeight: '1.4' }}>
+                  {mockScorecard.strengths.map((s, i) => <li key={i}>{s}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {mockScorecard.areas_for_improvement && mockScorecard.areas_for_improvement.length > 0 && (
+              <div style={{ marginBottom: '14px', fontSize: '11px' }}>
+                <strong style={{ color: '#fbbf24' }}>Areas to Polish:</strong>
+                <ul style={{ margin: '4px 0 0 14px', padding: 0, color: '#a1a1aa', lineHeight: '1.4' }}>
+                  {mockScorecard.areas_for_improvement.map((s, i) => <li key={i}>{s}</li>)}
+                </ul>
+              </div>
+            )}
+
+            <button className="coach-btn" onClick={() => setShowScorecardModal(false)} style={{ width: '100%' }}>
+              Close Scorecard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="tutor-footer">

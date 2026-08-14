@@ -380,6 +380,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "mock_evaluate") {
+    backendFetch("/mock-interview/evaluate", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // --- Journal export action ---
   if (request.action === "get_weekly_journal") {
     backendFetch("/journal/weekly")

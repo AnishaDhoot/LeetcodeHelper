@@ -1,23 +1,6 @@
 """
-recommender.py — Elo-based topic mastery scoring & next-problem selection.
-
-Elo update rule
----------------
-  expected  = 1 / (1 + 10 ** ((opponent_rating - player_rating) / 400))
-  new_rating = player_rating + K * (actual - expected)
-
-Where:
-  • player_rating   = TopicMastery.rating  (starts at 1200)
-  • opponent_rating = difficulty-based problem rating
-      Easy   → 800
-      Medium → 1200
-      Hard   → 1600
-  • actual  = 1.0 (Accepted) | 0.0 (failure)
-  • K       = dynamic: 32 for first 10 attempts, 24 for 11-30, 16 thereafter
-
-mastery_score (0-1) is derived from rating by the model property:
-    max(0, min(1, (rating - 800) / 1200))
-so rating 800 → 0.0, 1600 → ~0.67, 2000 → 1.0.
+recommender.py — Test-driven topic mastery scoring & next-problem selection.
+Badges and topic mastery levels (0-5) are unlocked strictly via Badge Tests.
 """
 
 import random
@@ -33,50 +16,16 @@ from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition
 # ---------------------------------------------------------------------------
 # Tuning constants
 # ---------------------------------------------------------------------------
-_DIFFICULTY_RATING = {
-    "Easy": 800,
-    "Medium": 1200,
-    "Hard": 1600,
-}
-_DEFAULT_PROBLEM_RATING = 1200  # fallback for unknown difficulties
-
-# Tier 2.3 — force Easy problems until a topic has this many attempts
 RAMP_THRESHOLD = 3
-
-# Tier 2.2 — exploration probability (epsilon-greedy)
 EPSILON = 0.15
 
-# Tier 2.1 — weak-pair detection: min co-occurrence count and max rating for "weak"
+# Weak-pair detection: min co-occurrence count and max badge level for "weak"
 WEAK_PAIR_MIN_COOCCUR = 2
-WEAK_PAIR_MAX_RATING = 1100.0  # mastery_score ≈ 25%
+WEAK_PAIR_MAX_LEVEL = 2  # Level 0 or 1 (< 40% mastery)
 
 # Module-level cache for weak pairs {result: list, computed_at: float}
 _weak_pair_cache: dict = {"result": [], "computed_at": 0.0}
 _WEAK_PAIR_TTL = 3600  # seconds
-
-
-# ---------------------------------------------------------------------------
-# Elo helpers
-# ---------------------------------------------------------------------------
-
-def _problem_rating(difficulty: str) -> int:
-    """Return the implied Elo rating for a given problem difficulty."""
-    return _DIFFICULTY_RATING.get(difficulty or "", _DEFAULT_PROBLEM_RATING)
-
-
-def _k_factor(attempts: int) -> float:
-    """Dynamic K-factor: large early on (fast learning), stable later."""
-    if attempts <= 10:
-        return 32.0
-    elif attempts <= 30:
-        return 24.0
-    return 16.0
-
-
-def _elo_update(player_rating: float, opponent_rating: int, actual: float, k: float) -> float:
-    """Return the new Elo rating after one match."""
-    expected = 1.0 / (1.0 + 10.0 ** ((opponent_rating - player_rating) / 400.0))
-    return player_rating + k * (actual - expected)
 
 
 # ---------------------------------------------------------------------------
@@ -90,15 +39,8 @@ def update_mastery_on_submission(
     difficulty: str = "Medium",
 ) -> TopicMastery:
     """
-    Updates TopicMastery via Elo rating math and reschedules spaced-repetition
-    review date based on the resulting mastery_score.
-
-    Parameters
-    ----------
-    db          : active SQLAlchemy session
-    topic_name  : topic string (e.g. "Arrays & Hashing")
-    is_success  : True → Accepted, False → any failure
-    difficulty  : problem difficulty used to set the opponent Elo rating
+    Updates TopicMastery attempt/success metrics and reschedules spaced-repetition
+    review dates. Badge levels advance exclusively via Badge Tests.
     """
     mastery = db.query(TopicMastery).filter(TopicMastery.topic == topic_name).first()
     if not mastery:
@@ -107,9 +49,10 @@ def update_mastery_on_submission(
             rating=1200.0,
             attempts_count=0,
             success_count=0,
+            level=0
         )
         db.add(mastery)
-        db.flush()  # assign PK before we modify it
+        db.flush()
 
     now = get_utc_now()
 
@@ -119,11 +62,11 @@ def update_mastery_on_submission(
         mastery.success_count += 1
     mastery.last_updated = get_utc_now()
 
-    # Keep rating column aligned with level
+    # Keep rating column synchronized with level (800 + level * 240)
     mastery.rating = 800.0 + (mastery.level or 0) * 240.0
 
     # --- Spaced-repetition scheduling ---
-    score = mastery.mastery_score  # derived 0-1 from model property
+    score = mastery.mastery_score  # derived 0-1 from level property
     if is_success:
         if score < 0.3:
             interval_days = 1
@@ -205,7 +148,7 @@ def compute_weak_pairs(db: Session) -> list:
 
     weak_masteries = (
         db.query(TopicMastery)
-        .filter(TopicMastery.rating < WEAK_PAIR_MAX_RATING)
+        .filter(TopicMastery.level < WEAK_PAIR_MAX_LEVEL)
         .all()
     )
     weak_topics = [m.topic for m in weak_masteries]
@@ -268,26 +211,24 @@ def get_topic_time_trend(db: Session, topic_name: str) -> list:
 # Tier 2.2 + 2.3 — Main recommender
 # ---------------------------------------------------------------------------
 
-def get_next_problem(db: Session, focus_topic: str = None, company: str = None) -> dict:
+def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict:
     """
     Determines recommended problems and spaced-repetition review items.
 
     Returns at least 3 unique problem recommendations plus all active reviews
     that are currently due.
 
-    Tier 2.3: For topics with attempts_count < RAMP_THRESHOLD, candidates are
-    restricted to Easy difficulty regardless of mastery score.
-
-    Tier 2.2: With probability EPSILON, the top pick is swapped for a random
-    problem outside the "productive struggle" mastery band (0.40–0.65), giving
-    the user occasional exposure to topics outside their current weak zone.
-
-    Parameters
-    ----------
-    focus_topic : prioritise this topic when non-None
-    company     : filter problem pool to those with this company tag (1.1)
+    Supports up to 3 focus topics (focus_topic can be a list or comma-separated string).
     """
     now = get_utc_now()
+
+    # Normalize focus_topics list (up to 3)
+    focus_list = []
+    if isinstance(focus_topic, str) and focus_topic.strip():
+        focus_list = [t.strip() for t in focus_topic.split(',') if t.strip()]
+    elif isinstance(focus_topic, (list, tuple)):
+        focus_list = [str(t).strip() for t in focus_topic if str(t).strip()]
+    focus_list = focus_list[:3]
 
     # 1. Gather active spaced-repetition reviews that are due
     reviews_due = db.query(SpacedRepetition).filter(
@@ -326,16 +267,16 @@ def get_next_problem(db: Session, focus_topic: str = None, company: str = None) 
 
     prioritized_topics = []
 
-    if focus_topic:
-        focus_record = next((m for m in masteries if m.topic == focus_topic), None)
-        if focus_record:
+    for f_topic in focus_list:
+        focus_record = next((m for m in masteries if m.topic == f_topic), None)
+        if focus_record and focus_record not in prioritized_topics:
             prioritized_topics.append(focus_record)
 
     overdue_topics = []
     other_topics = []
 
     for m in masteries:
-        if focus_topic and m.topic == focus_topic:
+        if m.topic in focus_list:
             continue  # already added above
 
         has_problems = any(

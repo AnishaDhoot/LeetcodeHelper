@@ -1028,7 +1028,7 @@ def fetch_company_csv_from_github(company_slug):
         return None
 
 def parse_company_csv(csv_data):
-    # CSV fields: ID,URL,Title,Difficulty,Acceptance %,Frequency %
+    # CSV fields: ID,URL,Title,Difficulty,Acceptance %,Frequency %,Is Premium
     f = io.StringIO(csv_data)
     reader = csv.DictReader(f)
     questions = []
@@ -1042,11 +1042,15 @@ def parse_company_csv(csv_data):
         if difficulty not in ["Easy", "Medium", "Hard"]:
             difficulty = "Medium"
 
+        is_prem_raw = str(row.get('Is Premium', row.get('Paid Only', row.get('is_paid_only', row.get('Is Paid', ''))))).strip().lower()
+        is_premium = is_prem_raw in ['1', 'true', 'yes', 'y']
+
         questions.append({
             'slug': slug.strip(),
             'title': row.get('Title', '').strip(),
             'difficulty': difficulty,
-            'url': url if url else f"https://leetcode.com/problems/{slug}/"
+            'url': url if url else f"https://leetcode.com/problems/{slug}/",
+            'is_premium': is_premium
         })
     return questions
 
@@ -1099,7 +1103,8 @@ def seed_db():
                             "url": f"https://leetcode.com/problems/{slug}/",
                             "difficulty": assigned_diff,
                             "topics": {topic_name},
-                            "companies": set()
+                            "companies": set(),
+                            "is_premium": q.get("is_premium", False)
                         }
                     else:
                         problems_dict[slug]["topics"].add(topic_name)
@@ -1136,7 +1141,8 @@ def seed_db():
                         'slug': q['slug'],
                         'title': q['title'],
                         'difficulty': q['difficulty'],
-                        'url': f"https://leetcode.com/problems/{q['slug']}/"
+                        'url': f"https://leetcode.com/problems/{q['slug']}/",
+                        'is_premium': q.get('is_premium', False)
                     })
                 print(f" -> Using local fallback list ({len(questions_to_load)} questions) for {comp_name}")
 
@@ -1145,6 +1151,8 @@ def seed_db():
                 q_slug = q_data['slug']
                 if q_slug in problems_dict:
                     problems_dict[q_slug]["companies"].add(comp_name)
+                    if q_data.get('is_premium'):
+                        problems_dict[q_slug]["is_premium"] = True
                 else:
                     problems_dict[q_slug] = {
                         "id": q_slug,
@@ -1152,7 +1160,8 @@ def seed_db():
                         "url": q_data['url'],
                         "difficulty": q_data['difficulty'],
                         "topics": {"Company Practice"},
-                        "companies": {comp_name}
+                        "companies": {comp_name},
+                        "is_premium": q_data.get('is_premium', False)
                     }
 
         # Seed Problems
@@ -1164,7 +1173,8 @@ def seed_db():
                 url=p_data["url"],
                 difficulty=p_data["difficulty"],
                 topics=",".join(sorted(list(p_data["topics"]))),
-                companies=",".join(sorted(list(p_data["companies"]))) if p_data["companies"] else None
+                companies=",".join(sorted(list(p_data["companies"]))) if p_data["companies"] else None,
+                is_premium=p_data.get("is_premium", False)
             )
             db.add(prob)
 

@@ -450,11 +450,62 @@ def generate_explain_back_check(
         "Please check if the explanation matches the code."
     )
 
-    fallback = {
-        "matches": True,
-        "discrepancy_note": None
-    }
-
     return query_llm_json(user_prompt, system_prompt, fallback)
+
+
+def evaluate_mock_approach(problem_title: str, approach_text: str) -> dict:
+    """Evaluates user's verbal strategy for a mock interview question."""
+    if not approach_text or len(approach_text.strip()) < 10:
+        return {
+            "approved": True,
+            "feedback": "Interviewer: 'Thanks for sharing your initial thoughts! Remember to specify your time and space complexity as you implement. Editor is now UNLOCKED.'"
+        }
+    
+    system_prompt = (
+        "You are a senior tech interviewer at a top tech company (like Meta or Google). "
+        "The candidate has provided their strategy/approach for solving a coding problem before writing code. "
+        "Evaluate their approach concisely (2-3 sentences max). "
+        "Acknowledge the strong points of their strategy, note their time/space complexity, and unlock the code editor. "
+        "Return ONLY a JSON object with keys: {\"approved\": true, \"feedback\": \"Interviewer commentary...\"}"
+    )
+    prompt = f"Problem: {problem_title}\nCandidate Approach: {approach_text}"
+    
+    fallback = {
+        "approved": True,
+        "feedback": f"Interviewer: 'Strategy received! Using {approach_text[:50]}... is a viable approach. Editor is now UNLOCKED. Good luck!'"
+    }
+    
+    return query_llm_json(prompt, system_prompt, fallback)
+
+
+def generate_mock_scorecard(company: str, duration_seconds: int, questions_data: list) -> dict:
+    """Generates an interview scorecard based on user performance across 3 mock questions."""
+    system_prompt = (
+        "You are a Lead Software Engineering Interviewer evaluating a candidate's full 3-question technical interview. "
+        "Return ONLY a JSON object with keys:\n"
+        "{\n"
+        '  "verdict": "Strong Hire" | "Hire" | "Weak Lean" | "Needs Practice",\n'
+        '  "strategy_score": 1-5,\n'
+        '  "code_quality_score": 1-5,\n'
+        '  "time_management_score": 1-5,\n'
+        '  "overall_summary": "Concise executive summary of performance",\n'
+        '  "strengths": ["list of 2-3 key strengths"],\n'
+        '  "areas_for_improvement": ["list of 2-3 improvement areas"]\n'
+        "}"
+    )
+    prompt = f"Company: {company or 'General Tech'}\nTime Spent: {duration_seconds // 60} minutes\nQuestions & Approaches: {json.dumps(questions_data)}"
+    
+    fallback = {
+        "verdict": "Hire",
+        "strategy_score": 4,
+        "code_quality_score": 4,
+        "time_management_score": 4,
+        "overall_summary": "Solid technical communication and structured problem solving across all questions.",
+        "strengths": ["Clear verbal strategy before coding", "Effective algorithm choices"],
+        "areas_for_improvement": ["Practice edge case validation before submitting", "Optimize space complexity where possible"]
+    }
+    
+    return query_llm_json(prompt, system_prompt, fallback)
+
 
 

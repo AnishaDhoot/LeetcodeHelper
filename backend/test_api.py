@@ -161,11 +161,9 @@ def test_health():
 @patch("backend.main.generate_approach_critique")
 def test_check_approach(mock_critique):
     mock_critique.return_value = {
-        "is_optimal": False,
-        "current_complexity": "O(N^2) time, O(1) space",
-        "optimal_complexity": "O(N) time, O(N) space",
-        "feedback": "Nested loops are too slow for the constraints.",
-        "alternative_approach": "Use a hash map to remember seen values."
+        "verdict": "Sub-optimal",
+        "explanation": "Nested loops are too slow for the constraints.",
+        "suggested_action": "Use a hash map to remember seen values."
     }
     payload = {
         "problem_id": "two-sum",
@@ -178,9 +176,9 @@ def test_check_approach(mock_critique):
     assert response.status_code == 200
     data = response.json()
     print(f"POST /approach/check returns: {data}")
-    assert data["is_optimal"] is False
-    assert "O(N)" in data["optimal_complexity"]
-    assert "hash map" in data["alternative_approach"]
+    assert "verdict" in data
+    assert "explanation" in data
+    assert "suggested_action" in data
 
 
 @patch("backend.main.generate_hint")
@@ -543,6 +541,59 @@ def test_quota_concurrency_at_boundary():
     db.close()
 
 
+def test_multi_focus_topics():
+    # Set 3 focus topics
+    res = client.post("/topics/focus", json={"topics": ["Arrays", "Two Pointers", "Dynamic Programming"]})
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["focus_topics"]) == 3
+    assert "Arrays" in data["focus_topics"]
+    assert "Dynamic Programming" in data["focus_topics"]
+
+    # Verify GET /topics/focus returns the 3 focus topics
+    get_res = client.get("/topics/focus")
+    assert get_res.status_code == 200
+    get_data = get_res.json()
+    assert len(get_data["focus_topics"]) == 3
+
+    # Clear focus
+    clear_res = client.post("/topics/focus", json={"topics": []})
+    assert clear_res.status_code == 200
+    assert clear_res.json()["focus_topics"] == []
+
+
+def test_mock_evaluate_and_premium_filtering():
+    # Clean active tests/mocks
+    db = SessionLocal()
+    db.query(BadgeTest).delete()
+    db.query(MockInterviewSession).delete()
+    db.commit()
+    db.close()
+
+    # Start mock interview
+    start_res = client.post("/mock-interview/start", json={"time_limit_seconds": 2700})
+    assert start_res.status_code == 200
+    session = start_res.json()
+    
+    # Submit approach with strategy
+    app_res = client.post("/mock-interview/approach", json={"session_id": session["session_id"], "approach_text": "Using Hash Map to achieve O(N) time complexity and O(N) space."})
+    assert app_res.status_code == 200
+    assert "feedback" in app_res.json()
+
+    # Evaluate session
+    eval_res = client.post("/mock-interview/evaluate", json={"session_id": session["session_id"]})
+    assert eval_res.status_code == 200
+    scorecard = eval_res.json()
+    assert "verdict" in scorecard
+    assert "strategy_score" in scorecard
+
+    # Clean up session
+    db = SessionLocal()
+    db.query(MockInterviewSession).delete()
+    db.commit()
+    db.close()
+
+
 if __name__ == "__main__":
     print("Starting backend tests...")
     test_db_setup()
@@ -567,5 +618,7 @@ if __name__ == "__main__":
     test_weekly_journal()
     test_analyze_submission_quota_exceeded()
     test_quota_concurrency_at_boundary()
+    test_multi_focus_topics()
+    test_mock_evaluate_and_premium_filtering()
     print("All backend tests passed successfully!")
 

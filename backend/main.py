@@ -30,7 +30,7 @@ from backend.models import (
     GetEdgeCasesRequest, GetEdgeCasesResponse,
     AskHelpRequest, AskHelpResponse,
     SyncSolvedRequest, SolvedProblemSyncSchema,
-    TopicAnalysisResponse, TopicStatItem, FocusResponse,
+    TopicAnalysisResponse, TopicStatItem, FocusResponse, SetFocusRequest,
     ExplainBackRequest, ExplainBackResponse,
     ComplexityEstimateRequest, ComplexityRevealRequest, ComplexityRevealResponse,
     StreakResponse, WeeklyJournalResponse,
@@ -157,6 +157,13 @@ def _ensure_schema():
                     with engine.begin() as conn:
                         conn.execute(text(ddl))
 
+    # -- problems columns --
+    if "problems" in table_names:
+        prob_cols = [c["name"] for c in insp.get_columns("problems")]
+        if "is_premium" not in prob_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE problems ADD COLUMN is_premium BOOLEAN DEFAULT 0 NOT NULL"))
+
     # -- mock_interview_sessions columns --
     if "mock_interview_sessions" in table_names:
         mock_cols = [c["name"] for c in insp.get_columns("mock_interview_sessions")]
@@ -172,6 +179,19 @@ def _ensure_schema():
         if "approaches_text" not in mock_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN approaches_text TEXT"))
+        if "ai_feedback" not in mock_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN ai_feedback TEXT"))
+        if "scorecard" not in mock_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE mock_interview_sessions ADD COLUMN scorecard TEXT"))
+
+    # -- badge_tests columns --
+    if "badge_tests" in table_names:
+        bt_cols = [c["name"] for c in insp.get_columns("badge_tests")]
+        if "time_limit_seconds" not in bt_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE badge_tests ADD COLUMN time_limit_seconds INTEGER DEFAULT 5400 NOT NULL"))
 
     # Check if database is empty and warn developer
     from backend.database import SessionLocal
@@ -549,8 +569,11 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     if target_level > 5:
         raise HTTPException(status_code=400, detail="Maximum badge level (Diamond) already achieved.")
 
-    # Select 2 problems for the test
-    problems = db.query(Problem).filter(Problem.topics.like(f"%{req.topic}%")).all()
+    # Select 2 non-premium problems for the test
+    problems = db.query(Problem).filter(
+        Problem.topics.like(f"%{req.topic}%"),
+        Problem.is_premium == False
+    ).all()
     if target_level == 1:
         targets = ["Easy"]
     elif target_level in [2, 3]:
@@ -564,7 +587,7 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     if len(candidates) < 2:
         candidates = problems
     if len(candidates) < 2:
-        candidates = db.query(Problem).all()
+        candidates = db.query(Problem).filter(Problem.is_premium == False).all()
 
     import random
     selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]
@@ -578,11 +601,16 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         problem2_id=selected[1].id,
         problem1_solved=False,
         problem2_solved=False,
+        time_limit_seconds=5400,
         start_time=get_utc_now()
     )
     db.add(test)
     db.commit()
     db.refresh(test)
+
+    now = get_utc_now()
+    time_limit = getattr(test, 'time_limit_seconds', 5400) or 5400
+    elapsed = int((now - test.start_time).total_seconds())
 
     return BadgeTestSchema(
         id=test.id,
@@ -593,6 +621,8 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         problem2=BadgeTestProblemSchema(id=selected[1].id, title=selected[1].title, url=selected[1].url, difficulty=selected[1].difficulty),
         problem1_solved=test.problem1_solved,
         problem2_solved=test.problem2_solved,
+        time_limit_seconds=time_limit,
+        elapsed_seconds=elapsed,
         start_time=test.start_time,
         end_time=test.end_time
     )
@@ -602,6 +632,16 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
 def get_active_badge_test(db: Session = Depends(get_db)):
     test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     if not test:
+        return None
+
+    now = get_utc_now()
+    time_limit = getattr(test, 'time_limit_seconds', 5400) or 5400
+    elapsed = int((now - test.start_time).total_seconds())
+
+    if elapsed > time_limit:
+        test.status = "expired"
+        test.end_time = now
+        db.commit()
         return None
 
     p1 = db.query(Problem).filter(Problem.id == test.problem1_id).first()
@@ -616,6 +656,8 @@ def get_active_badge_test(db: Session = Depends(get_db)):
         problem2=BadgeTestProblemSchema(id=p2.id, title=p2.title, url=p2.url, difficulty=p2.difficulty),
         problem1_solved=test.problem1_solved,
         problem2_solved=test.problem2_solved,
+        time_limit_seconds=time_limit,
+        elapsed_seconds=elapsed,
         start_time=test.start_time,
         end_time=test.end_time
     )
@@ -665,11 +707,9 @@ def check_approach(req: CheckApproachRequest, db: Session = Depends(get_db)):
         constraints=req.constraints
     )
     return CheckApproachResponse(
-        is_optimal=bool(result.get("is_optimal", False)),
-        current_complexity=result.get("current_complexity", "Unknown"),
-        optimal_complexity=result.get("optimal_complexity", "Unknown"),
-        feedback=result.get("feedback", ""),
-        alternative_approach=result.get("alternative_approach", "")
+        verdict=result.get("verdict", "Critique complete"),
+        explanation=result.get("explanation") or result.get("feedback", ""),
+        suggested_action=result.get("suggested_action") or result.get("alternative_approach", "")
     )
 
 
@@ -684,7 +724,7 @@ def get_hint(req: GetHintRequest, db: Session = Depends(get_db)):
         language=req.language,
         constraints=req.constraints
     )
-    return GetHintResponse(hint=result.get("hint", ""))
+    return GetHintResponse(hint=result.get("hint", ""), level=req.level or 1, has_next=(req.level or 1) < 3)
 
 
 @app.post("/hints/reveal", response_model=HintRevealResponse)
@@ -872,30 +912,41 @@ def get_topic_analysis(db: Session = Depends(get_db)):
 
 @app.get("/topics/focus", response_model=FocusResponse)
 def get_focus(db: Session = Depends(get_db)):
-    """Returns the saved focus topic (or None)."""
+    """Returns the saved focus topics (up to 3)."""
     cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
-    return FocusResponse(focus_topic=cfg.value if cfg else None)
+    val = cfg.value if cfg else ""
+    topics = [t.strip() for t in val.split(",") if t.strip()] if val else []
+    return FocusResponse(focus_topic=val if val else None, focus_topics=topics)
 
 
 @app.post("/topics/focus", response_model=FocusResponse)
-def set_focus(topic: Optional[str] = None, db: Session = Depends(get_db)):
-    """Saves (or clears, when topic is empty/None) the focus topic."""
-    value = topic.strip() if topic and topic.strip() else None
+def set_focus(req: Optional[SetFocusRequest] = None, topic: Optional[str] = None, db: Session = Depends(get_db)):
+    """Saves (or clears) focus topics (up to 3)."""
+    val_to_save = []
+    if req and req.topics is not None:
+        val_to_save = [t.strip() for t in req.topics if t and t.strip()][:3]
+    elif req and req.topic is not None:
+        val_to_save = [t.strip() for t in req.topic.split(",") if t and t.strip()][:3]
+    elif topic is not None:
+        val_to_save = [t.strip() for t in topic.split(",") if t and t.strip()][:3]
+
     cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
-    if value is None:
-        # Clear focus
+    if not val_to_save:
         if cfg:
             db.delete(cfg)
-        result = None
+        saved_str = None
+        topics_out = []
     else:
+        saved_str = ",".join(val_to_save)
         if cfg:
-            cfg.value = value
+            cfg.value = saved_str
         else:
-            cfg = UserConfig(key=FOCUS_KEY, value=value)
+            cfg = UserConfig(key=FOCUS_KEY, value=saved_str)
             db.add(cfg)
-        result = value
+        topics_out = val_to_save
+
     db.commit()
-    return FocusResponse(focus_topic=result)
+    return FocusResponse(focus_topic=saved_str, focus_topics=topics_out)
 
 
 @app.get("/companies")
@@ -1046,17 +1097,21 @@ def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
     rec_res = get_next_problem(db, company=req.company)
     recs = rec_res.get("recommendations", [])
     
-    # 2. Find problems matching the company
+    # 2. Find non-premium problems matching the company
     company_problems = []
     if req.company:
-        company_problems = db.query(Problem).filter(Problem.companies.like(f"%{req.company}%")).all()
+        company_problems = db.query(Problem).filter(
+            Problem.companies.like(f"%{req.company}%"),
+            Problem.is_premium == False
+        ).all()
     
-    # 3. Mix recommendations, other company problems, and random problems to select exactly 3 problems
+    # 3. Mix recommendations, other company problems, and random non-premium problems to select exactly 3 problems
     selected_probs = []
     seen_ids = set()
     
     for r in recs:
-        if r["problem_id"] not in seen_ids:
+        p_obj = db.query(Problem).filter(Problem.id == r["problem_id"]).first()
+        if p_obj and not p_obj.is_premium and r["problem_id"] not in seen_ids:
             seen_ids.add(r["problem_id"])
             selected_probs.append(r["problem_id"])
             if len(selected_probs) == 3:
@@ -1064,17 +1119,17 @@ def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
                 
     if len(selected_probs) < 3:
         for p in company_problems:
-            if p.id not in seen_ids:
+            if not p.is_premium and p.id not in seen_ids:
                 seen_ids.add(p.id)
                 selected_probs.append(p.id)
                 if len(selected_probs) == 3:
                     break
                     
-    # Fill up with random problems if not enough
+    # Fill up with random non-premium problems if not enough
     if len(selected_probs) < 3:
-        all_probs = db.query(Problem).filter(Problem.topics != "Company Practice").all()
+        all_probs = db.query(Problem).filter(Problem.topics != "Company Practice", Problem.is_premium == False).all()
         if not all_probs:
-            all_probs = db.query(Problem).all()
+            all_probs = db.query(Problem).filter(Problem.is_premium == False).all()
         import random
         random.shuffle(all_probs)
         for p in all_probs:
@@ -1190,6 +1245,20 @@ def get_active_mock_interview(db: Session = Depends(get_db)):
         except Exception:
             pass
 
+    ai_feedbacks = ["", "", ""]
+    if session.ai_feedback:
+        try:
+            ai_feedbacks = json.loads(session.ai_feedback)
+        except Exception:
+            pass
+
+    scorecard_data = None
+    if session.scorecard:
+        try:
+            scorecard_data = json.loads(session.scorecard)
+        except Exception:
+            pass
+
     return {
         "session_id": session.id,
         "problem_id": cur_prob.id,
@@ -1207,13 +1276,15 @@ def get_active_mock_interview(db: Session = Depends(get_db)):
         "problem_urls": [p.url for p in probs],
         "difficulties": [p.difficulty for p in probs],
         "approaches_submitted_list": appr_sub,
-        "approaches_text_list": appr_texts
+        "approaches_text_list": appr_texts,
+        "ai_feedback_list": ai_feedbacks,
+        "scorecard": scorecard_data
     }
 
 
 @app.post("/mock-interview/approach")
 def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)):
-    """Records the approach explanation before unlocking code editor (Tier 4.1)."""
+    """Records the approach explanation before unlocking code editor and provides AI feedback."""
     session = db.query(MockInterviewSession).filter(MockInterviewSession.id == req.session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Mock session not found.")
@@ -1249,8 +1320,66 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
     session.approaches_text = json.dumps(appr_texts)
     session.approach_submitted_at = get_utc_now()
     
+    # Generate AI Interviewer Feedback on the strategy
+    problem_ids = [pid.strip() for pid in (session.problem_ids or "").split(",") if pid.strip()]
+    cur_prob_id = problem_ids[cur_idx] if cur_idx < len(problem_ids) else session.problem_id
+    cur_prob = db.query(Problem).filter(Problem.id == cur_prob_id).first()
+    prob_title = cur_prob.title if cur_prob else cur_prob_id
+
+    from backend.agent import evaluate_mock_approach
+    eval_res = evaluate_mock_approach(prob_title, req.approach_text)
+    
+    ai_feedbacks = ["", "", ""]
+    if session.ai_feedback:
+        try:
+            ai_feedbacks = json.loads(session.ai_feedback)
+        except Exception:
+            pass
+    while len(ai_feedbacks) < 3:
+        ai_feedbacks.append("")
+    ai_feedbacks[cur_idx] = eval_res.get("feedback", "")
+    session.ai_feedback = json.dumps(ai_feedbacks)
+
     db.commit()
-    return {"status": "approach_accepted", "session_id": session.id}
+    return {
+        "status": "approach_accepted",
+        "session_id": session.id,
+        "feedback": eval_res.get("feedback", ""),
+        "approved": eval_res.get("approved", True)
+    }
+
+
+class MockEvaluateRequest(BaseModel):
+    session_id: int
+
+
+@app.post("/mock-interview/evaluate")
+def evaluate_mock_session(req: MockEvaluateRequest, db: Session = Depends(get_db)):
+    """Generates an AI interviewer evaluation scorecard for the mock interview session."""
+    session = db.query(MockInterviewSession).filter(MockInterviewSession.id == req.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Mock session not found.")
+    
+    import json
+    from backend.agent import generate_mock_scorecard
+    
+    prob_ids = [p.strip() for p in (session.problem_ids or "").split(",") if p.strip()]
+    appr_texts = json.loads(session.approaches_text) if session.approaches_text else ["", "", ""]
+    
+    questions_data = []
+    for idx, pid in enumerate(prob_ids):
+        p = db.query(Problem).filter(Problem.id == pid).first()
+        questions_data.append({
+            "title": p.title if p else pid,
+            "difficulty": p.difficulty if p else "Medium",
+            "approach": appr_texts[idx] if idx < len(appr_texts) else ""
+        })
+        
+    duration = session.time_taken_seconds or int((get_utc_now() - session.start_time).total_seconds())
+    card = generate_mock_scorecard(session.company, duration, questions_data)
+    session.scorecard = json.dumps(card)
+    db.commit()
+    return card
 
 
 @app.post("/mock-interview/switch")

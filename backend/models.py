@@ -22,6 +22,7 @@ class Problem(Base):
     topics = Column(String, nullable=False) # Comma-separated list of topics, e.g. "Arrays,Two Pointers"
     companies = Column(String, nullable=True)  # Comma-separated company names, e.g. "Google,Amazon"
     is_solved = Column(Boolean, default=False, nullable=False) # True once synced from LeetCode history
+    is_premium = Column(Boolean, default=False, nullable=False) # True if paid/premium LeetCode problem
     user_notes = Column(Text, nullable=True)
     personal_difficulty = Column(String, nullable=True) # e.g. "Hard for me", "Tricky Edge Cases", "Medium", "Easy"
 
@@ -97,6 +98,7 @@ class BadgeTest(Base):
     problem2_id = Column(String, nullable=False)
     problem1_solved = Column(Boolean, default=False, nullable=False)
     problem2_solved = Column(Boolean, default=False, nullable=False)
+    time_limit_seconds = Column(Integer, default=5400, nullable=False)  # 1.5 hours default
     start_time = Column(DateTime, default=get_utc_now, nullable=False)
     end_time = Column(DateTime, nullable=True)
 
@@ -136,7 +138,7 @@ class MockInterviewSession(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     problem_id = Column(String, ForeignKey("problems.id"), nullable=False)
     start_time = Column(DateTime, default=get_utc_now, nullable=False)
-    time_limit_seconds = Column(Integer, default=2700, nullable=False)  # 45 min default
+    time_limit_seconds = Column(Integer, default=7200, nullable=False)  # 2 hours default
     company = Column(String, nullable=True)
     approach_submitted_at = Column(DateTime, nullable=True)
     submitted_at = Column(DateTime, nullable=True)
@@ -147,6 +149,8 @@ class MockInterviewSession(Base):
     current_question_index = Column(Integer, default=0, nullable=False)
     approaches_submitted = Column(String, default="0,0,0", nullable=False)  # Comma-separated "0" or "1"
     approaches_text = Column(Text, nullable=True)  # JSON-serialized list of approach texts
+    ai_feedback = Column(Text, nullable=True)  # JSON-serialized list of AI strategy feedback
+    scorecard = Column(Text, nullable=True)  # JSON-serialized scorecard summary
 
     problem = relationship("Problem")
 
@@ -232,6 +236,8 @@ class BadgeTestSchema(BaseModel):
     problem2: BadgeTestProblemSchema
     problem1_solved: bool
     problem2_solved: bool
+    time_limit_seconds: int = 5400
+    elapsed_seconds: int = 0
     start_time: datetime
     end_time: Optional[datetime] = None
 
@@ -301,10 +307,12 @@ class TopicAnalysisResponse(BaseModel):
 
 class FocusResponse(BaseModel):
     focus_topic: Optional[str] = None
+    focus_topics: List[str] = []
 
 
 class SetFocusRequest(BaseModel):
-    topic: Optional[str] = None  # None / empty clears the focus
+    topic: Optional[str] = None  # Single topic or comma-separated
+    topics: Optional[List[str]] = None  # Up to 3 focus topics
 
 
 class CheckApproachRequest(BaseModel):
@@ -317,34 +325,56 @@ class CheckApproachRequest(BaseModel):
 
 
 class CheckApproachResponse(BaseModel):
-    is_optimal: bool
-    current_complexity: str
-    optimal_complexity: str
-    feedback: str
-    alternative_approach: str
+    verdict: str
+    explanation: str
+    suggested_action: str
 
 
 # --- Levelled hint schemas (Tier 3.1) ---
+
+class ComplexityEstimateRequest(BaseModel):
+    problem_id: str
+    user_time: str
+    user_space: str
+    code: str
+    language: str
+
+
+class ComplexityRevealRequest(BaseModel):
+    problem_id: str
+    code: str
+    language: str
+
+
+class ComplexityRevealResponse(BaseModel):
+    optimal_time: str
+    optimal_space: str
+    user_matches: bool
+    explanation: str
+
 
 class GetHintRequest(BaseModel):
     problem_id: str
     problem_title: str
     code: str
     language: str
+    level: Optional[int] = 1  # 1, 2, or 3
     constraints: Optional[List[str]] = None
     is_contest: Optional[bool] = False
 
 
 class GetHintResponse(BaseModel):
     hint: str
+    level: int
+    has_next: bool
 
 
 class HintRevealRequest(BaseModel):
     problem_id: str
-    problem_title: str
+    problem_title: Optional[str] = None
     code: str
     language: str
-    level: int  # 1, 2, or 3
+    level: Optional[int] = 1  # 1, 2, or 3
     constraints: Optional[List[str]] = None
     is_contest: Optional[bool] = False
 
@@ -398,29 +428,7 @@ class ExplainBackResponse(BaseModel):
     discrepancy_note: Optional[str] = None
 
 
-# --- Complexity self-estimate schemas (Tier 3.3) ---
-
-class ComplexityEstimateRequest(BaseModel):
-    problem_id: str
-    time_complexity: str   # e.g. "O(N log N)"
-    space_complexity: str  # e.g. "O(1)"
-    is_contest: Optional[bool] = False
-
-
-class ComplexityRevealRequest(BaseModel):
-    problem_id: str
-    problem_title: str
-    code: str
-    language: str
-    constraints: Optional[List[str]] = None
-    is_contest: Optional[bool] = False
-
-
-class ComplexityRevealResponse(BaseModel):
-    estimate: Optional[dict]  # stored guess: {time_complexity, space_complexity}
-    is_optimal: bool
-    current_complexity: str
-    optimal_complexity: str
+class ApproachCritiqueResponse(BaseModel):
     feedback: str
     alternative_approach: str
 
@@ -449,7 +457,7 @@ class WeeklyJournalResponse(BaseModel):
 
 class MockStartRequest(BaseModel):
     company: Optional[str] = None
-    time_limit_seconds: int = 2700  # 45 min default
+    time_limit_seconds: int = 7200  # 2 hours default
 
 
 class MockStartResponse(BaseModel):

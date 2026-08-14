@@ -85,12 +85,47 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
+      // 1. Try to click LeetCode's native Reset Code button in DOM
+      const resetBtn = document.querySelector('button[aria-label*="Reset"], button[data-cypress="ResetCode"], [class*="reset"]');
+      if (resetBtn) {
+        resetBtn.click();
+        setTimeout(() => {
+          const confirmBtns = document.querySelectorAll('button');
+          confirmBtns.forEach(btn => {
+            const txt = (btn.textContent || '').trim().toLowerCase();
+            if (txt === 'confirm' || txt === 'reset' || txt === 'restore') {
+              btn.click();
+            }
+          });
+        }, 150);
+      }
+
+      // 2. Also reset Monaco editor models directly to basic starter signature
       const models = window.monaco?.editor?.getModels();
       if (models && models.length > 0) {
         models.forEach(model => {
           const uriStr = model.uri ? model.uri.toString() : "";
           if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-            model.setValue("");
+            const val = model.getValue() || "";
+            if (val) {
+              const lines = val.split("\n");
+              const stubLines = [];
+              let insideFunc = false;
+              for (let line of lines) {
+                // Retain class and function signature headers
+                if (line.includes("class Solution") || line.includes("def ") || line.includes("public ") || line.includes("function ") || line.includes("var ") || line.includes("int ") || line.includes("struct ") || line.includes("vector<")) {
+                  stubLines.push(line);
+                  insideFunc = true;
+                } else if (insideFunc && (line.trim().startsWith("}") || line.trim() === "")) {
+                  stubLines.push(line);
+                }
+              }
+              if (stubLines.length >= 2) {
+                model.setValue(stubLines.join("\n"));
+              } else {
+                model.setValue("");
+              }
+            }
           }
         });
       }
