@@ -99,6 +99,33 @@
   color: #e4e4e7;
 }
 
+/* ── Trigger Icon (Collapsed State) ── */
+.tutor-trigger {
+  position: fixed;
+  top: 140px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  background: #0e0e10;
+  border: 1px solid #1f1f23;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -4px 0 12px rgba(0,0,0,0.5);
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 999999;
+  transition: all 0.2s ease;
+}
+
+.tutor-trigger:hover {
+  background: #18181b;
+  width: 42px;
+  color: #f59e0b;
+}
+
 /* ── Tabs ── */
 .tabs-container {
   display: flex;
