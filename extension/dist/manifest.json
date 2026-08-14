@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "DSA Tutor Agent",
+  "version": "0.1",
+  "description": "Autonomous DSA Tutor Agent overlay for LeetCode. Conceptual failure diagnostics and adaptive problem recommendation.",
+  "permissions": ["storage", "scripting", "cookies", "tabs", "alarms"],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "http://localhost:8000/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://leetcode.com/problems/*",
+        "https://leetcode.com/contest/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js", "content.css"],
+      "matches": ["https://leetcode.com/*"]
+    }
+  ]
+}

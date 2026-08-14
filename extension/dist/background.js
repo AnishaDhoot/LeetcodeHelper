@@ -1,0 +1,464 @@
+// Chrome Extension Service Worker (background.js)
+// Handles API calls to the local FastAPI backend to bypass CORS and extension constraints,
+// and fetches the user's LeetCode solved-problem history via scripting injection.
+
+let DEFAULT_BACKEND_URL = "http://localhost:8000";
+
+async function getBackendUrl() {
+  try {
+    const data = await chrome.storage.local.get("customBackendUrl");
+    if (data && data.customBackendUrl) {
+      return data.customBackendUrl.replace(/\/+$/, "");
+    }
+  } catch (e) {
+    console.warn("[DSA Tutor Background] Failed to read storage URL:", e);
+  }
+  return DEFAULT_BACKEND_URL;
+}
+
+// Generic JSON POST/GET helper that resolves sendResponse.
+async function backendFetch(path, { method = "GET", body } = {}) {
+  const baseUrl = await getBackendUrl();
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${baseUrl}${path}`, opts);
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// LeetCode history fetch via chrome.scripting.executeScript (world: "MAIN")
+//
+// WHY world:"MAIN": The injected code runs inside the LeetCode page's own
+// JavaScript context, so every fetch is same-origin (leetcode.com → leetcode.com)
+// with session cookies included automatically. No CORS issues.
+//
+// HOW we get ALL problems: LeetCode's /api/problems/all/ REST endpoint returns
+// every problem the authenticated user has attempted, including solved status.
+// This has no page-size limit — one request gives the full history.
+// ---------------------------------------------------------------------------
+
+async function fetchSolvedProblemsViaTab() {
+  // Find an open leetcode.com tab to piggy-back on.
+  const tabs = await chrome.tabs.query({ url: "https://leetcode.com/*" });
+  if (!tabs || tabs.length === 0) {
+    throw new Error(
+      "No LeetCode tab found. Please open leetcode.com in a tab and try again."
+    );
+  }
+  const tabId = tabs[0].id;
+
+  // Inject script into the LeetCode page (MAIN world = same-origin fetch).
+  const results = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: async () => {
+      // ── Step 1: Get ALL solved problems in ONE request ──────────────────
+      // /api/problems/all/ returns every LeetCode problem with the user's
+      // solved status (status === "ac"). No pagination, no artificial limit.
+      const apiRes = await fetch("https://leetcode.com/api/problems/all/", {
+        credentials: "include"
+      });
+      if (!apiRes.ok) throw new Error(`Problems API HTTP ${apiRes.status}`);
+      const apiData = await apiRes.json();
+
+      if (!apiData.user_name) {
+        throw new Error(
+          "Not signed in to LeetCode. Please log in and visit leetcode.com first."
+        );
+      }
+
+      const diffMap = { 1: "Easy", 2: "Medium", 3: "Hard" };
+      const solved = (apiData.stat_status_pairs || [])
+        .filter(p => p.status === "ac" && !p.stat.question__hide)
+        .map(p => ({
+          slug: p.stat.question__title_slug,
+          title: p.stat.question__title || p.stat.question__title_slug,
+          difficulty: diffMap[p.difficulty?.level] || "Medium"
+        }));
+
+      if (solved.length === 0) return { ok: true, problems: [] };
+
+      // ── Step 2: Fetch topic tags concurrently with rate-limiting ────────────
+      // Batches of 5 concurrent requests with a brief delay between batches to avoid 429 rate limits.
+      const BATCH = 5;
+      const problems = [];
+
+      for (let i = 0; i < solved.length; i += BATCH) {
+        const chunk = solved.slice(i, i + BATCH);
+        const settled = await Promise.allSettled(
+          chunk.map(async ({ slug, title, difficulty }) => {
+            try {
+              const r = await fetch("https://leetcode.com/graphql/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  query: `query q($s: String!) { question(titleSlug: $s) { topicTags { name } } }`,
+                  variables: { s: slug }
+                })
+              });
+              const d = r.ok ? await r.json() : null;
+              const tags = (d?.data?.question?.topicTags || []).map(t => t.name);
+              return {
+                problem_id: slug,
+                title,
+                difficulty,
+                topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
+              };
+            } catch {
+              return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"] };
+            }
+          })
+        );
+        settled.forEach(r => r.status === "fulfilled" && problems.push(r.value));
+        if (i + BATCH < solved.length) {
+          await new Promise((res) => setTimeout(res, 80));
+        }
+      }
+
+      return { ok: true, problems };
+    }
+  });
+
+  const result = results?.[0]?.result;
+  if (!result?.ok) {
+    throw new Error(
+      "Script returned no result. Please refresh the LeetCode tab and try again."
+    );
+  }
+  return result.problems;
+}
+
+// ---------------------------------------------------------------------------
+// Tier 1.2 — Due review alarm & badge updater
+// ---------------------------------------------------------------------------
+async function updateReviewBadge() {
+  try {
+    const data = await backendFetch("/reviews/count");
+    const dueCount = data.due_count || 0;
+    if (dueCount > 0) {
+      chrome.action.setBadgeText({ text: String(dueCount) });
+      chrome.action.setBadgeBackgroundColor({ color: "#ef4444" }); // urgent red badge
+    } else {
+      chrome.action.setBadgeText({ text: "" });
+    }
+  } catch (err) {
+    console.log("[DSA Tutor Background] Failed to fetch review count for badge:", err);
+  }
+}
+
+// Set up alarm every 15 mins
+chrome.alarms.create("check_reviews_due", { periodInMinutes: 15 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "check_reviews_due") {
+    updateReviewBadge();
+  }
+});
+// Initial check on startup
+updateReviewBadge();
+
+// ---------------------------------------------------------------------------
+// Message router
+// ---------------------------------------------------------------------------
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log("[DSA Tutor Background] Received message:", request);
+
+  // --- Backend passthrough actions ---
+  if (request.action === "analyze_submission") {
+    backendFetch("/submissions/analyze", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_mastery") {
+    backendFetch("/topics/mastery")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_recommendation") {
+    const company = request.payload?.company ? `?company=${encodeURIComponent(request.payload.company)}` : "";
+    backendFetch(`/problems/next${company}`)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_companies") {
+    backendFetch("/companies")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_company_metadata") {
+    backendFetch("/companies/metadata")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_reviews_count") {
+    backendFetch("/reviews/count")
+      .then((data) => {
+        updateReviewBadge();
+        sendResponse({ success: true, data });
+      })
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_streak") {
+    backendFetch("/activity/streak")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_weak_pairs") {
+    backendFetch("/topics/weak-pairs")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_time_trend") {
+    const topic = request.payload?.topic || "";
+    backendFetch(`/topics/time-trend?topic=${encodeURIComponent(topic)}`)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "record_success") {
+    const { problem_id, topic } = request.payload;
+    backendFetch(`/submissions/success?problem_id=${problem_id}&topic=${encodeURIComponent(topic)}`, { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Badge Test actions ---
+  if (request.action === "start_badge_test") {
+    backendFetch("/badge-test/start", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_active_badge_test") {
+    backendFetch("/badge-test/active")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "abandon_badge_test") {
+    backendFetch("/badge-test/abandon", { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- AI quota and active mock interview actions ---
+  if (request.action === "get_ai_quota") {
+    backendFetch("/ai/quota")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_active_mock") {
+    backendFetch("/mock-interview/active")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Code Coach actions ---
+  if (request.action === "check_approach") {
+    backendFetch("/approach/check", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "critique_estimate") {
+    backendFetch("/critique/estimate", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "critique_reveal") {
+    backendFetch("/critique/reveal", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "explain_back") {
+    backendFetch("/submissions/explain-back", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_hint") {
+    backendFetch("/hints/get", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "reveal_hint") {
+    backendFetch("/hints/reveal", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_edge_cases") {
+    backendFetch("/edge-cases/get", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "ask_help") {
+    backendFetch("/help/ask", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "check_health") {
+    backendFetch("/health")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "sync_solved") {
+    backendFetch("/sync/solved", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Mock Interview actions ---
+  if (request.action === "mock_start") {
+    backendFetch("/mock-interview/start", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_switch") {
+    backendFetch("/mock-interview/switch", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_approach") {
+    backendFetch("/mock-interview/approach", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_submit") {
+    backendFetch("/mock-interview/submit", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_evaluate") {
+    backendFetch("/mock-interview/evaluate", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Journal export action ---
+  if (request.action === "get_weekly_journal") {
+    backendFetch("/journal/weekly")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_mock_report") {
+    backendFetch("/mock-interview/report")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- LeetCode history fetch (injects into LeetCode tab for same-origin access) ---
+  if (request.action === "fetch_leetcode_history") {
+    fetchSolvedProblemsViaTab()
+      .then((problems) => sendResponse({ success: true, data: { problems } }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Analysis & Focus actions ---
+  if (request.action === "get_analysis") {
+    backendFetch("/topics/analysis")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "get_focus") {
+    backendFetch("/topics/focus")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "set_focus") {
+    const topic = request.payload?.topic || "";
+    backendFetch(`/topics/focus?topic=${encodeURIComponent(topic)}`, { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "export_solved_csv") {
+    const timeframe = request.payload?.timeframe || "current_week";
+    getBackendUrl().then((baseUrl) => {
+      fetch(`${baseUrl}/export/solved-csv?timeframe=${encodeURIComponent(timeframe)}`)
+        .then((res) => res.text())
+        .then((data) => sendResponse({ success: true, data }))
+        .catch((err) => sendResponse({ success: false, error: err.message }));
+    });
+    return true;
+  }
+
+  if (request.action === "get_problem_details") {
+    const problemId = request.payload?.problem_id;
+    backendFetch(`/problems/${encodeURIComponent(problemId)}`)
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "save_problem_notes") {
+    const problemId = request.payload?.problem_id;
+    backendFetch(`/problems/${encodeURIComponent(problemId)}/notes`, { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+});
+
+

@@ -5,7 +5,6 @@ __pycache__/
 
 # Node / Frontend Build Outputs
 node_modules/
-extension/dist/
 extension/node_modules/
 .oxlintrc.json
 
