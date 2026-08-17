@@ -1710,10 +1710,10 @@ export default function App() {
               </select>
             </div>
 
-            {focusTopic && (
+            {focusTopics && focusTopics.length > 0 && (
               <div className="rec-focus-note">
-                <span>🎯 Focus Topic: <strong>{focusTopic}</strong></span>
-                <button className="focus-change-btn-inline" onClick={() => setFocus('')}>✕</button>
+                <span>🎯 Focus ({focusTopics.length}/3): <strong>{focusTopics.join(', ')}</strong></span>
+                <button className="focus-change-btn-inline" onClick={() => clearFocusTopics()}>✕</button>
               </div>
             )}
             
@@ -1739,11 +1739,11 @@ export default function App() {
                           {recTopics.map(t => (
                             <button
                               key={t}
-                              className={`focus-pick-btn ${t === focusTopic ? 'active' : ''}`}
-                              onClick={() => setFocus(t === focusTopic ? '' : t)}
+                              className={`focus-pick-btn ${focusTopics.includes(t) ? 'active' : ''}`}
+                              onClick={() => toggleFocusTopic(t)}
                               style={{ fontSize: '10px', padding: '2px 6px', border: '1px solid #27272a', borderRadius: '4px', cursor: 'pointer' }}
                             >
-                              🎯 {t === focusTopic ? 'Focused' : `Focus on ${t}`}
+                              🎯 {focusTopics.includes(t) ? 'Focused' : `Focus on ${t}`}
                             </button>
                           ))}
                         </div>
@@ -1794,11 +1794,11 @@ export default function App() {
                               {revTopics.map(t => (
                                 <button
                                   key={t}
-                                  className={`focus-pick-btn ${t === focusTopic ? 'active' : ''}`}
-                                  onClick={() => setFocus(t === focusTopic ? '' : t)}
+                                  className={`focus-pick-btn ${focusTopics.includes(t) ? 'active' : ''}`}
+                                  onClick={() => toggleFocusTopic(t)}
                                   style={{ fontSize: '9px', padding: '2px 5px', border: '1px solid #27272a', borderRadius: '4px', cursor: 'pointer' }}
                                 >
-                                  🎯 {t === focusTopic ? 'Focused' : `Focus on ${t}`}
+                                  🎯 {focusTopics.includes(t) ? 'Focused' : `Focus on ${t}`}
                                 </button>
                               ))}
                             </div>
