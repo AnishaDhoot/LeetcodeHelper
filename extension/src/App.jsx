@@ -103,7 +103,7 @@ export default function App() {
         const remaining = res.data.time_limit_seconds - res.data.elapsed_seconds;
         setMockTimerSeconds(remaining > 0 ? remaining : 0);
         setIsMockMode(true);
-        setActiveTab('mastery');
+        setActiveTab('mock');
         if (!res.data.approach_submitted && window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
         } else if (res.data.approach_submitted && window.dsaTutor?.setEditorReadOnly) {
@@ -298,7 +298,7 @@ export default function App() {
         setMockApproachSubmitted(false);
         setMockTimerSeconds(res.data.time_limit_seconds || 2700);
         setIsMockMode(true);
-        setActiveTab('mastery');
+        setActiveTab('mock');
         if (window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
         }
@@ -329,10 +329,11 @@ export default function App() {
   const submitMockApproach = () => {
     if (!mockApproachText.trim() || !mockSession) return;
     chrome.runtime.sendMessage({ action: 'mock_approach', payload: { session_id: mockSession.session_id, approach_text: mockApproachText } }, (res) => {
-      if (res && res.success) {
-        setMockApproachSubmitted(true);
+      if (res && res.success && res.data) {
+        const approved = !!res.data.approved;
+        setMockApproachSubmitted(approved);
         if (window.dsaTutor?.setEditorReadOnly) {
-          window.dsaTutor.setEditorReadOnly(false);
+          window.dsaTutor.setEditorReadOnly(!approved);
         }
         fetchActiveMock(); // Refresh active mock to receive AI feedback
       }
@@ -698,6 +699,39 @@ export default function App() {
     return () => clearInterval(t);
   }, [isMockMode, mockSession]);
 
+  // Enforce editor locking and clear previous solution attempts during Mock Interview mode
+  useEffect(() => {
+    if (isMockMode && !mockApproachSubmitted) {
+      if (window.dsaTutor?.setEditorReadOnly) {
+        window.dsaTutor.setEditorReadOnly(true);
+      }
+      if (window.dsaTutor?.resetEditor) {
+        window.dsaTutor.resetEditor();
+      }
+      const t1 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 800);
+      const t2 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 2000);
+
+      const lockPulse = setInterval(() => {
+        if (window.dsaTutor?.setEditorReadOnly) {
+          window.dsaTutor.setEditorReadOnly(true);
+        }
+      }, 500);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+        clearInterval(lockPulse);
+      };
+    } else if (isMockMode && mockApproachSubmitted) {
+      if (window.dsaTutor?.setEditorReadOnly) {
+        window.dsaTutor.setEditorReadOnly(false);
+      }
+    } else if (!isMockMode) {
+      if (window.dsaTutor?.setEditorReadOnly) {
+        window.dsaTutor.setEditorReadOnly(false);
+      }
+    }
+  }, [isMockMode, mockApproachSubmitted, mockSession?.current_question_index]);
+
   // Active Badge Test countdown timer
   useEffect(() => {
     if (!activeTest) return;
@@ -943,47 +977,59 @@ export default function App() {
       {/* Tabs Menu */}
       {!activeTest && (
         <div className="tabs-container">
-          {!isMockMode && (
+          {isMockMode ? (
             <button
-              className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
-              onClick={() => setActiveTab('coach')}
+              className="tab-btn active"
+              style={{ flex: 1, color: '#f87171', background: '#18181b', border: '1px solid #ef444455', fontWeight: '600' }}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
-                <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight: '4px'}}>
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
               </svg>
-              Coach
+              Mock Interview
             </button>
+          ) : (
+            <>
+              <button
+                className={`tab-btn ${activeTab === 'coach' ? 'active' : ''}`}
+                onClick={() => setActiveTab('coach')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
+                  <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
+                </svg>
+                Coach
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 'recommendation' ? 'active' : ''}`}
+                onClick={() => setActiveTab('recommendation')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Next
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 'mastery' ? 'active' : ''}`}
+                onClick={() => setActiveTab('mastery')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 3v18h18" />
+                  <path d="m19 9-5 5-4-4-3 3" />
+                </svg>
+                Mastery
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+                onClick={() => setActiveTab('history')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 .49-4.5" />
+                </svg>
+                Sync
+              </button>
+            </>
           )}
-          <button
-            className={`tab-btn ${activeTab === 'recommendation' ? 'active' : ''}`}
-            onClick={() => setActiveTab('recommendation')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-            Next
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'mastery' ? 'active' : ''}`}
-            onClick={() => setActiveTab('mastery')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 3v18h18" />
-              <path d="m19 9-5 5-4-4-3 3" />
-            </svg>
-            Mastery
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
-            onClick={() => setActiveTab('history')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="1 4 1 10 7 10" />
-              <path d="M3.51 15a9 9 0 1 0 .49-4.5" />
-            </svg>
-            Sync
-          </button>
         </div>
       )}
 
@@ -1077,7 +1123,7 @@ export default function App() {
             )}
 
             {/* Review Today Prompt Banner */}
-            {recommendation?.reviews && recommendation.reviews.length > 0 && activeTab !== 'recommendation' && !activeTest && (
+            {recommendation?.reviews && recommendation.reviews.length > 0 && activeTab !== 'recommendation' && !activeTest && !isMockMode && (
               <div
                 onClick={() => setActiveTab('recommendation')}
                 style={{ background: '#f59e0b1b', border: '1px solid #f59e0b66', borderRadius: '6px', padding: '8px 10px', marginBottom: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -1157,6 +1203,11 @@ export default function App() {
                     <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px', fontWeight: '500' }}>
                       🔒 Code Editor Locked! Write your algorithm approach & time/space complexity to unlock:
                     </div>
+                    {mockSession.ai_feedback_list && mockSession.ai_feedback_list[mockSession.current_question_index] && (
+                      <div style={{ background: '#18181b', border: '1px solid #3f3f46', borderLeft: '3px solid #f59e0b', borderRadius: '4px', padding: '8px', fontSize: '11px', color: '#fcd34d', lineHeight: '1.4', marginBottom: '8px' }}>
+                        🤖 <strong>AI Interviewer:</strong> {mockSession.ai_feedback_list[mockSession.current_question_index]}
+                      </div>
+                    )}
                     <textarea
                       className="ask-input"
                       rows={3}
@@ -1185,7 +1236,7 @@ export default function App() {
             )}
 
             {/* TAB 1: MASTERY OVERVIEW */}
-            {!activeTest && activeTab === 'mastery' && (
+            {!activeTest && !isMockMode && activeTab === 'mastery' && (
               <div>
                 {/* Focus banner */}
                 {focusTopics && focusTopics.length > 0 && (
@@ -1275,7 +1326,7 @@ export default function App() {
         )}
 
         {/* TAB 2: CODE COACH */}
-        {activeTab === 'coach' && (
+        {!activeTest && !isMockMode && activeTab === 'coach' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
               <h4 className="section-heading" style={{ margin: 0 }}>Code Coach</h4>
@@ -1692,7 +1743,7 @@ export default function App() {
         )}
 
         {/* TAB 3: RECOMMENDATION */}
-        {activeTab === 'recommendation' && (
+        {!activeTest && !isMockMode && activeTab === 'recommendation' && (
           <div>
             {/* Company Tag Filter (Tier 1.1) */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', background: '#141416', padding: '8px 12px', borderRadius: '8px', border: '1px solid #27272a' }}>
@@ -1834,7 +1885,7 @@ export default function App() {
         )}
 
         {/* TAB 4: HISTORY SYNC */}
-        {activeTab === 'history' && (
+        {!activeTest && !isMockMode && activeTab === 'history' && (
           <div>
             <h4 className="section-heading">LeetCode History Sync</h4>
             <p className="coach-intro">

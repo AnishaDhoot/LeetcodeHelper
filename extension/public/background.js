@@ -82,40 +82,86 @@ async function fetchSolvedProblemsViaTab() {
 
       if (solved.length === 0) return { ok: true, problems: [] };
 
-      // ── Step 2: Fetch topic tags concurrently with rate-limiting ────────────
-      // Batches of 5 concurrent requests with a brief delay between batches to avoid 429 rate limits.
-      const BATCH = 5;
+      // ── Step 2: Fetch topic tags via bulk GraphQL or fast concurrent batching ────────────
+      const topicMap = new Map();
+      try {
+        const bulkRes = await fetch("https://leetcode.com/graphql/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: `query problemsetQuestionList {
+              problemsetQuestionList: questionList(categorySlug: "", limit: 4000, skip: 0, filters: {}) {
+                questions: data {
+                  titleSlug
+                  topicTags { name }
+                }
+              }
+            }`
+          })
+        });
+        if (bulkRes.ok) {
+          const bulkData = await bulkRes.json();
+          const qList = bulkData?.data?.problemsetQuestionList?.questions || [];
+          for (const q of qList) {
+            if (q.titleSlug && q.topicTags) {
+              topicMap.set(q.titleSlug, q.topicTags.map(t => t.name));
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[DSA Tutor] Bulk topic fetch failed, falling back to batching:", e);
+      }
+
+      const missingSlugs = [];
       const problems = [];
 
-      for (let i = 0; i < solved.length; i += BATCH) {
-        const chunk = solved.slice(i, i + BATCH);
-        const settled = await Promise.allSettled(
-          chunk.map(async ({ slug, title, difficulty }) => {
-            try {
-              const r = await fetch("https://leetcode.com/graphql/", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  query: `query q($s: String!) { question(titleSlug: $s) { topicTags { name } } }`,
-                  variables: { s: slug }
-                })
-              });
-              const d = r.ok ? await r.json() : null;
-              const tags = (d?.data?.question?.topicTags || []).map(t => t.name);
-              return {
-                problem_id: slug,
-                title,
-                difficulty,
-                topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
-              };
-            } catch {
-              return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"] };
-            }
-          })
-        );
-        settled.forEach(r => r.status === "fulfilled" && problems.push(r.value));
-        if (i + BATCH < solved.length) {
-          await new Promise((res) => setTimeout(res, 80));
+      for (const { slug, title, difficulty } of solved) {
+        if (topicMap.has(slug)) {
+          const tags = topicMap.get(slug);
+          problems.push({
+            problem_id: slug,
+            title,
+            difficulty,
+            topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
+          });
+        } else {
+          missingSlugs.push({ slug, title, difficulty });
+        }
+      }
+
+      // Fallback for any missing slugs with fast concurrent batching (BATCH = 20):
+      if (missingSlugs.length > 0) {
+        const BATCH = 20;
+        for (let i = 0; i < missingSlugs.length; i += BATCH) {
+          const chunk = missingSlugs.slice(i, i + BATCH);
+          const settled = await Promise.allSettled(
+            chunk.map(async ({ slug, title, difficulty }) => {
+              try {
+                const r = await fetch("https://leetcode.com/graphql/", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    query: `query q($s: String!) { question(titleSlug: $s) { topicTags { name } } }`,
+                    variables: { s: slug }
+                  })
+                });
+                const d = r.ok ? await r.json() : null;
+                const tags = (d?.data?.question?.topicTags || []).map(t => t.name);
+                return {
+                  problem_id: slug,
+                  title,
+                  difficulty,
+                  topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
+                };
+              } catch {
+                return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"] };
+              }
+            })
+          );
+          settled.forEach(r => r.status === "fulfilled" && problems.push(r.value));
+          if (i + BATCH < missingSlugs.length) {
+            await new Promise((res) => setTimeout(res, 20));
+          }
         }
       }
 

@@ -14,6 +14,41 @@ from sqlalchemy import desc
 from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition
 
 # ---------------------------------------------------------------------------
+# Topic Tag Isolation Helper
+# ---------------------------------------------------------------------------
+EXCLUDED_TAGS_FOR_TOPIC = {
+    "Arrays & Hashing": ["tree", "graph", "depth-first search", "breadth-first search", "trie", "dynamic programming", "backtracking", "union-find"],
+    "Two Pointers": ["tree", "graph", "trie"],
+    "Sliding Window": ["tree", "graph", "trie"],
+    "Stack": ["tree", "graph"],
+    "Binary Search": ["tree", "graph"],
+    "Linked List": ["tree", "graph"],
+    "Trees & BST": ["graph"],
+}
+
+def filter_problems_for_topic(problems: list, target_topic: str) -> list:
+    """
+    Filters out problems whose secondary metadata tags conflict with the primary target topic.
+    For example, excludes Tree/Graph/DP/Backtracking problems when selecting pure 'Arrays & Hashing' questions.
+    """
+    excluded = EXCLUDED_TAGS_FOR_TOPIC.get(target_topic, [])
+    if not excluded:
+        t_low = (target_topic or "").lower()
+        if "array" in t_low or "hash" in t_low:
+            excluded = ["tree", "graph", "depth-first search", "breadth-first search", "trie", "dynamic programming", "backtracking"]
+
+    if not excluded:
+        return problems
+
+    valid = []
+    for p in problems:
+        t_str = (p.topics or "").lower()
+        if not any(ex in t_str for ex in excluded):
+            valid.append(p)
+    return valid if len(valid) >= 2 else problems
+
+
+# ---------------------------------------------------------------------------
 # Tuning constants
 # ---------------------------------------------------------------------------
 RAMP_THRESHOLD = 3
@@ -347,6 +382,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
 
         # Adjust for recent streaks
         topic_problems = [p for p in base_pool if topic in (p.topics or "")]
+        topic_problems = filter_problems_for_topic(topic_problems, topic)
         topic_prob_ids = [p.id for p in topic_problems]
         recent_attempts = (
             db.query(Attempt)

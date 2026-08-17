@@ -455,26 +455,31 @@ def generate_explain_back_check(
 
 def evaluate_mock_approach(problem_title: str, approach_text: str) -> dict:
     """Evaluates user's verbal strategy for a mock interview question."""
-    if not approach_text or len(approach_text.strip()) < 10:
+    text_clean = (approach_text or "").strip().lower()
+
+    invalid_phrases = ["idk", "i don't know", "dont know", "no idea", "asdf", "skip", "pass", "help", "dunno", "na", "n/a", "none"]
+    is_non_answer = len(text_clean) < 8 or any(text_clean == p or text_clean.startswith(p + " ") or text_clean.endswith(" " + p) for p in invalid_phrases)
+
+    if is_non_answer:
         return {
-            "approved": True,
-            "feedback": "Interviewer: 'Thanks for sharing your initial thoughts! Remember to specify your time and space complexity as you implement. Editor is now UNLOCKED.'"
+            "approved": False,
+            "feedback": "Interviewer: 'Please describe a specific algorithm approach (e.g. Two Pointers, Hash Map, Sliding Window, BFS/DFS, DP) and your estimated time & space complexity before unlocking the code editor.'"
         }
-    
+
     system_prompt = (
-        "You are a senior tech interviewer at a top tech company (like Meta or Google). "
-        "The candidate has provided their strategy/approach for solving a coding problem before writing code. "
-        "Evaluate their approach concisely (2-3 sentences max). "
-        "Acknowledge the strong points of their strategy, note their time/space complexity, and unlock the code editor. "
-        "Return ONLY a JSON object with keys: {\"approved\": true, \"feedback\": \"Interviewer commentary...\"}"
+        "You are a Senior Technical Interviewer at a top tech company evaluating a candidate's verbal strategy before coding.\n"
+        "Review the candidate's explanation for the problem:\n"
+        "- As long as the candidate proposes a plausible algorithm idea, data structure, or technique (e.g., two pointers, hash map, sliding window, binary search, bfs/dfs, dp, greedy, recursion, sorting): return approved=true with brief encouraging commentary.\n"
+        "- Only return approved=false if the candidate states they don't know, provides complete nonsense, or gives no strategy at all.\n\n"
+        "Return ONLY a JSON object: {\"approved\": boolean, \"feedback\": \"Interviewer commentary...\"}"
     )
     prompt = f"Problem: {problem_title}\nCandidate Approach: {approach_text}"
-    
+
     fallback = {
         "approved": True,
-        "feedback": f"Interviewer: 'Strategy received! Using {approach_text[:50]}... is a viable approach. Editor is now UNLOCKED. Good luck!'"
+        "feedback": f"Interviewer: 'Strategy received! Using {approach_text[:60]}... is a valid approach. Editor is UNLOCKED. Good luck!'"
     }
-    
+
     return query_llm_json(prompt, system_prompt, fallback)
 
 

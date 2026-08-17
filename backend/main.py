@@ -51,7 +51,8 @@ from backend.recommender import (
     get_next_problem,
     update_spaced_repetition,
     compute_weak_pairs,
-    get_topic_time_trend
+    get_topic_time_trend,
+    filter_problems_for_topic
 )
 from backend.seed import seed_db
 
@@ -551,13 +552,22 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     mock = db.query(MockInterviewSession).filter(MockInterviewSession.submitted_at.is_(None)).order_by(MockInterviewSession.id.desc()).first()
     if mock:
         elapsed = (get_utc_now() - mock.start_time).total_seconds()
-        if elapsed <= mock.time_limit_seconds:
+        if elapsed > mock.time_limit_seconds:
+            mock.submitted_at = get_utc_now()
+            db.commit()
+        else:
             raise HTTPException(status_code=400, detail="Cannot start a Badge Test while a Mock Interview is active.")
 
     # Check if there is already an active test
     active = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     if active:
-        raise HTTPException(status_code=400, detail="A Badge Test is already active.")
+        elapsed = (get_utc_now() - active.start_time).total_seconds()
+        time_limit = getattr(active, 'time_limit_seconds', 5400) or 5400
+        if elapsed > time_limit:
+            active.status = "failed"
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="A Badge Test is already active.")
 
     mastery = db.query(TopicMastery).filter(TopicMastery.topic == req.topic).first()
     if not mastery:
@@ -570,10 +580,20 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Maximum badge level (Diamond) already achieved.")
 
     # Select 2 non-premium problems for the test
-    problems = db.query(Problem).filter(
-        Problem.topics.like(f"%{req.topic}%"),
+    topic_clean = req.topic.replace("Arrays & Hashing", "Array").replace("Trees & BST", "Tree").replace("Graphs", "Graph")
+    raw_problems = db.query(Problem).filter(
+        Problem.topics.like(f"%{topic_clean}%"),
         Problem.is_premium == False
     ).all()
+    if not raw_problems:
+        raw_problems = db.query(Problem).filter(
+            Problem.topics.like(f"%{req.topic}%"),
+            Problem.is_premium == False
+        ).all()
+
+    # Filter out secondary conflicting tags (Trees, Graphs, BFS, DFS, DP, Trie, etc.) for pure topic tests
+    problems = filter_problems_for_topic(raw_problems, req.topic)
+
     if target_level == 1:
         targets = ["Easy"]
     elif target_level in [2, 3]:
@@ -587,7 +607,7 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     if len(candidates) < 2:
         candidates = problems
     if len(candidates) < 2:
-        candidates = db.query(Problem).filter(Problem.is_premium == False).all()
+        candidates = filter_problems_for_topic(db.query(Problem).filter(Problem.is_premium == False).all(), req.topic)
 
     import random
     selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]
@@ -790,9 +810,21 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
     never overwritten. success_rate is left at 0 (we have no real attempts yet).
     """
     topics_seen = set()
+    solved_per_topic = Counter()
+
+    prob_ids = [p.problem_id for p in req.problems if p.problem_id]
+    existing_problems = {
+        p.id: p for p in db.query(Problem).filter(Problem.id.in_(prob_ids)).all()
+    } if prob_ids else {}
+
+    existing_srs = {
+        sr.problem_id: sr for sr in db.query(SpacedRepetition).filter(SpacedRepetition.problem_id.in_(prob_ids)).all()
+    } if prob_ids else {}
+
+    now_utc = get_utc_now()
+    due_utc = now_utc + timedelta(days=3)
 
     # 1. Upsert each problem (mark solved) and collect per-topic solved counts.
-    solved_per_topic = Counter()
     for prob in req.problems:
         topics_csv = ", ".join(prob.topics) if prob.topics else "Arrays & Hashing"
         for t in [t.strip() for t in topics_csv.split(",") if t.strip()]:
@@ -800,7 +832,7 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             solved_per_topic[t] += 1
 
         url = f"https://leetcode.com/problems/{prob.problem_id}/"
-        problem = db.query(Problem).filter(Problem.id == prob.problem_id).first()
+        problem = existing_problems.get(prob.problem_id)
         if problem:
             # Refresh metadata for a previously seen problem
             problem.title = prob.title or problem.title
@@ -819,23 +851,26 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             )
             db.add(problem)
 
-        # Seed initial spaced repetition schedule for synced solved problem
-        sr = db.query(SpacedRepetition).filter(SpacedRepetition.problem_id == prob.problem_id).first()
-        if not sr:
+        # Seed initial spaced repetition schedule for solved problem (due in 3 days)
+        if prob.problem_id not in existing_srs:
             sr = SpacedRepetition(
                 problem_id=prob.problem_id,
                 stage=1,
-                last_solved=get_utc_now(),
-                next_due=get_utc_now() + timedelta(days=3)
+                last_solved=now_utc,
+                next_due=due_utc
             )
             db.add(sr)
 
     # 2. Seed per-topic mastery from solved counts (never clobber live data).
+    existing_masteries = {
+        tm.topic: tm for tm in db.query(TopicMastery).filter(TopicMastery.topic.in_(list(topics_seen))).all()
+    } if topics_seen else {}
+
     new_topics = 0
     seeded_topics = 0
     for topic in topics_seen:
         solved_count = solved_per_topic[topic]
-        mastery = db.query(TopicMastery).filter(TopicMastery.topic == topic).first()
+        mastery = existing_masteries.get(topic)
         if not mastery:
             # Brand-new topic: seed with level 0 (Locked badge)
             mastery = TopicMastery(
@@ -861,6 +896,25 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
         "seeded_topics": seeded_topics,
         "message": f"Synced {synced} problem(s) across {len(topics_seen)} topic(s); seeded {seeded_topics} topic(s)."
     }
+
+
+@app.get("/reviews/count")
+def get_reviews_count(db: Session = Depends(get_db)):
+    """Returns count of active spaced repetition reviews due today (Tier 1.2)."""
+    now = get_utc_now()
+    due_count = db.query(SpacedRepetition).filter(
+        SpacedRepetition.next_due <= now,
+        SpacedRepetition.stage < 5
+    ).count()
+    return {"due_count": due_count}
+
+
+@app.post("/reviews/clear")
+def clear_reviews(db: Session = Depends(get_db)):
+    """Clears all spaced repetition review records from the database."""
+    deleted = db.query(SpacedRepetition).delete()
+    db.commit()
+    return {"deleted": deleted, "message": f"Cleared {deleted} review records."}
 
 
 @app.get("/topics/analysis", response_model=TopicAnalysisResponse)
@@ -1290,17 +1344,27 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Mock session not found.")
 
     cur_idx = session.current_question_index
-    
+
+    # Generate AI Interviewer Feedback on the strategy
+    problem_ids = [pid.strip() for pid in (session.problem_ids or "").split(",") if pid.strip()]
+    cur_prob_id = problem_ids[cur_idx] if cur_idx < len(problem_ids) else session.problem_id
+    cur_prob = db.query(Problem).filter(Problem.id == cur_prob_id).first()
+    prob_title = cur_prob.title if cur_prob else cur_prob_id
+
+    from backend.agent import evaluate_mock_approach
+    eval_res = evaluate_mock_approach(prob_title, req.approach_text)
+    is_approved = eval_res.get("approved", False)
+
     appr_sub = ["0", "0", "0"]
     if session.approaches_submitted:
         parts = [p.strip() for p in session.approaches_submitted.split(",")]
         for idx, val in enumerate(parts):
             if idx < len(appr_sub):
                 appr_sub[idx] = val
-                
+
     if cur_idx < len(appr_sub):
-        appr_sub[cur_idx] = "1"
-        
+        appr_sub[cur_idx] = "1" if is_approved else "0"
+
     session.approaches_submitted = ",".join(appr_sub)
 
     import json
@@ -1310,25 +1374,16 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
             appr_texts = json.loads(session.approaches_text)
         except Exception:
             pass
-            
+
     while len(appr_texts) < 3:
         appr_texts.append("")
-        
+
     if cur_idx < len(appr_texts):
         appr_texts[cur_idx] = req.approach_text
-        
+
     session.approaches_text = json.dumps(appr_texts)
     session.approach_submitted_at = get_utc_now()
-    
-    # Generate AI Interviewer Feedback on the strategy
-    problem_ids = [pid.strip() for pid in (session.problem_ids or "").split(",") if pid.strip()]
-    cur_prob_id = problem_ids[cur_idx] if cur_idx < len(problem_ids) else session.problem_id
-    cur_prob = db.query(Problem).filter(Problem.id == cur_prob_id).first()
-    prob_title = cur_prob.title if cur_prob else cur_prob_id
 
-    from backend.agent import evaluate_mock_approach
-    eval_res = evaluate_mock_approach(prob_title, req.approach_text)
-    
     ai_feedbacks = ["", "", ""]
     if session.ai_feedback:
         try:
@@ -1342,10 +1397,10 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
 
     db.commit()
     return {
-        "status": "approach_accepted",
+        "status": "approach_accepted" if is_approved else "approach_rejected",
         "session_id": session.id,
         "feedback": eval_res.get("feedback", ""),
-        "approved": eval_res.get("approved", True)
+        "approved": is_approved
     }
 
 
