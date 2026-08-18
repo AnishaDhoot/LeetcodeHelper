@@ -991,7 +991,32 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
         { "title": "Merge Two Sorted Lists", "slug": "merge-two-sorted-lists", "difficulty": "Easy" },
-        { "title": "Longest Palindromic Substring", "slug": "longest-palindromic-substring", "difficulty": "Medium" }
+        { "title": "Longest Palindromic Substring", "slug": "longest-palindromic-substring", "difficulty": "Medium" },
+        { "title": "Valid Palindrome", "slug": "valid-palindrome", "difficulty": "Easy" },
+        { "title": "Reverse String", "slug": "reverse-string", "difficulty": "Easy" },
+        { "title": "Valid Anagram", "slug": "valid-anagram", "difficulty": "Easy" },
+        { "title": "Climbing Stairs", "slug": "climbing-stairs", "difficulty": "Easy" },
+        { "title": "Maximum Subarray", "slug": "maximum-subarray", "difficulty": "Medium" },
+        { "title": "Best Time to Buy and Sell Stock", "slug": "best-time-to-buy-and-sell-stock", "difficulty": "Easy" },
+        { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" },
+        { "title": "Linked List Cycle", "slug": "linked-list-cycle", "difficulty": "Easy" },
+        { "title": "Longest Common Prefix", "slug": "longest-common-prefix", "difficulty": "Easy" },
+        { "title": "Remove Duplicates from Sorted Array", "slug": "remove-duplicates-from-sorted-array", "difficulty": "Easy" },
+        { "title": "Move Zeroes", "slug": "move-zeroes", "difficulty": "Easy" },
+        { "title": "Single Number", "slug": "single-number", "difficulty": "Easy" },
+        { "title": "Majority Element", "slug": "majority-element", "difficulty": "Easy" },
+        { "title": "3Sum", "slug": "3sum", "difficulty": "Medium" },
+        { "title": "Container With Most Water", "slug": "container-with-most-water", "difficulty": "Medium" },
+        { "title": "Product of Array Except Self", "slug": "product-of-array-except-self", "difficulty": "Medium" },
+        { "title": "Group Anagrams", "slug": "group-anagrams", "difficulty": "Medium" },
+        { "title": "Coin Change", "slug": "coin-change", "difficulty": "Medium" },
+        { "title": "Longest Substring Without Repeating Characters", "slug": "longest-substring-without-repeating-characters", "difficulty": "Medium" },
+        { "title": "Search in Rotated Sorted Array", "slug": "search-in-rotated-sorted-array", "difficulty": "Medium" },
+        { "title": "Sort Colors", "slug": "sort-colors", "difficulty": "Medium" },
+        { "title": "Rotate Image", "slug": "rotate-image", "difficulty": "Medium" },
+        { "title": "Spiral Matrix", "slug": "spiral-matrix", "difficulty": "Medium" },
+        { "title": "House Robber", "slug": "house-robber", "difficulty": "Medium" },
+        { "title": "Word Break", "slug": "word-break", "difficulty": "Medium" }
       ]
     },
     {

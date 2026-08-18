@@ -1155,75 +1155,98 @@ class MockSwitchRequest(BaseModel):
 
 @app.post("/mock-interview/start", response_model=MockStartResponse)
 def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
-    """Starts a timed mock interview session with 3 questions (Tier 4.1)."""
+    """Starts a timed mock interview session with 3 randomized questions (Tier 4.1)."""
+    import random
+
     active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     if active_test:
         raise HTTPException(status_code=400, detail="Cannot start a Mock Interview while a Badge Test is active.")
 
-    # 1. Fetch recommendations for the company
-    rec_res = get_next_problem(db, company=req.company)
-    recs = rec_res.get("recommendations", [])
-    
-    # 2. Find non-premium problems matching the company
-    company_problems = []
+    # 1. Fetch recently used problem IDs from past mock sessions to avoid repeats
+    past_sessions = db.query(MockInterviewSession).order_by(MockInterviewSession.id.desc()).limit(15).all()
+    recently_used_ids = set()
+    for s in past_sessions:
+        if s.problem_ids:
+            for pid in s.problem_ids.split(","):
+                if pid.strip():
+                    recently_used_ids.add(pid.strip())
+
+    # 2. Build candidate problem pool
+    candidate_pool = []
     if req.company:
-        company_problems = db.query(Problem).filter(
+        company_probs = db.query(Problem).filter(
             Problem.companies.like(f"%{req.company}%"),
             Problem.is_premium == False
         ).all()
-    
-    # 3. Mix recommendations, other company problems, and random non-premium problems to select exactly 3 problems
-    selected_probs = []
-    seen_ids = set()
-    
-    for r in recs:
-        p_obj = db.query(Problem).filter(Problem.id == r["problem_id"]).first()
-        if p_obj and not p_obj.is_premium and r["problem_id"] not in seen_ids:
-            seen_ids.add(r["problem_id"])
-            selected_probs.append(r["problem_id"])
-            if len(selected_probs) == 3:
-                break
-                
-    if len(selected_probs) < 3:
-        for p in company_problems:
-            if not p.is_premium and p.id not in seen_ids:
-                seen_ids.add(p.id)
-                selected_probs.append(p.id)
-                if len(selected_probs) == 3:
-                    break
-                    
-    # Fill up with random non-premium problems if not enough
-    if len(selected_probs) < 3:
-        all_probs = db.query(Problem).filter(Problem.topics != "Company Practice", Problem.is_premium == False).all()
-        if not all_probs:
-            all_probs = db.query(Problem).filter(Problem.is_premium == False).all()
-        import random
-        random.shuffle(all_probs)
-        for p in all_probs:
-            if p.id not in seen_ids:
-                seen_ids.add(p.id)
-                selected_probs.append(p.id)
-                if len(selected_probs) == 3:
-                    break
+        if len(company_probs) >= 3:
+            candidate_pool = company_probs
+        else:
+            candidate_pool = db.query(Problem).filter(Problem.is_premium == False).all()
+    else:
+        candidate_pool = db.query(Problem).filter(Problem.is_premium == False).all()
 
-    # If database has extremely few problems (less than 3), duplicate them to fill up to 3
-    while len(selected_probs) < 3 and selected_probs:
-        selected_probs.append(selected_probs[0])
-        
-    if not selected_probs:
+    # 3. Filter out recently used problems if enough fresh problems exist
+    fresh_pool = [p for p in candidate_pool if p.id not in recently_used_ids]
+    if len(fresh_pool) < 3:
+        fresh_pool = candidate_pool
+
+    if not fresh_pool:
         raise HTTPException(status_code=404, detail="No suitable problems found for mock interview.")
 
-    # 4. Resolve the problems' details
-    probs = [db.query(Problem).filter(Problem.id == pid).first() for pid in selected_probs]
-    probs = [p for p in probs if p is not None]
-    if not probs:
-        raise HTTPException(status_code=404, detail="Problems not found in database.")
+    # 4. Partition by difficulty to select 1 Easy, 1 Medium, 1 Hard (or balanced mix)
+    easy_pool = [p for p in fresh_pool if p.difficulty == "Easy"]
+    medium_pool = [p for p in fresh_pool if p.difficulty == "Medium"]
+    hard_pool = [p for p in fresh_pool if p.difficulty == "Hard"]
+
+    selected_probs = []
     
-    while len(probs) < 3:
-        probs.append(probs[0])
-        
+    # Pick 1 Easy
+    if easy_pool:
+        p_easy = random.choice(easy_pool)
+        selected_probs.append(p_easy)
+        fresh_pool = [p for p in fresh_pool if p.id != p_easy.id]
+
+    # Pick 1 Medium
+    medium_pool = [p for p in fresh_pool if p.difficulty == "Medium"]
+    if medium_pool:
+        p_med = random.choice(medium_pool)
+        selected_probs.append(p_med)
+        fresh_pool = [p for p in fresh_pool if p.id != p_med.id]
+
+    # Pick 1 Hard (or 2nd Medium / remaining)
+    hard_or_med_pool = [p for p in fresh_pool if p.difficulty in ["Hard", "Medium"]]
+    if not hard_or_med_pool:
+        hard_or_med_pool = fresh_pool
+
+    if hard_or_med_pool:
+        p_third = random.choice(hard_or_med_pool)
+        selected_probs.append(p_third)
+        fresh_pool = [p for p in fresh_pool if p.id != p_third.id]
+
+    # Fill up if less than 3
+    while len(selected_probs) < 3 and fresh_pool:
+        p_next = random.choice(fresh_pool)
+        selected_probs.append(p_next)
+        fresh_pool = [p for p in fresh_pool if p.id != p_next.id]
+
+    # Backup fill from all candidate problems if still needed
+    if len(selected_probs) < 3:
+        remaining = [p for p in candidate_pool if p not in selected_probs]
+        while len(selected_probs) < 3 and remaining:
+            p_rem = random.choice(remaining)
+            selected_probs.append(p_rem)
+            remaining.remove(p_rem)
+
+    # Final fallback if pool was tiny
+    while len(selected_probs) < 3 and selected_probs:
+        selected_probs.append(selected_probs[0])
+
+    # Shuffle selected 3 problems
+    random.shuffle(selected_probs)
+    probs = selected_probs[:3]
+    
     problem_ids_str = ",".join([p.id for p in probs])
-    
+
     # 5. Create MockInterviewSession record
     import json
     session = MockInterviewSession(
