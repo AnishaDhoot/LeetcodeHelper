@@ -1,4 +1,4 @@
-# DSA Helper — Autonomous LeetCode Companion
+# CodeCoach — Autonomous LeetCode Companion
 
 > An intelligent, autonomous Data Structures & Algorithms (DSA) tutor overlay for LeetCode. Features conceptual failure diagnostics, Elo-based topic mastery scoring, progressive hint revealing, timed mock interviews, spaced repetition reviews, and real-time interactive Code Coaching.
 
