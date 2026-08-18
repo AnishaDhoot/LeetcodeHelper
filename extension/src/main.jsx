@@ -261,8 +261,13 @@ const handleVerdictDetected = async (verdict, node) => {
   });
 };
 
+const processedVerdictNodes = new WeakSet();
+const lastDetectedSubmissions = new Map();
+
 const checkNodeForVerdict = (node) => {
-  if (!node) return;
+  if (!node || !(node instanceof HTMLElement)) return;
+  if (processedVerdictNodes.has(node) || node.dataset?.dsaProcessed === "true") return;
+
   const text = node.textContent?.trim() || '';
   if (!text) return;
 
@@ -270,9 +275,21 @@ const checkNodeForVerdict = (node) => {
   for (const v of verdicts) {
     // Only match small text leaves (like status badges) to avoid match triggers on large parent divs.
     if (text === v || (text.includes(v) && text.length < 40)) {
+      const { problemId } = scrapeProblemIdentity();
+      const subKey = `${problemId}_${v}`;
       const now = Date.now();
-      if (now - lastTriggerTime < 6000) return; // Prevent multiple triggers within 6s
-      lastTriggerTime = now;
+      const lastTime = lastDetectedSubmissions.get(subKey) || 0;
+
+      // Mark element as processed immediately
+      processedVerdictNodes.add(node);
+      try { node.dataset.dsaProcessed = "true"; } catch (e) {}
+
+      // Suppress duplicate triggers for the same problem + verdict within 45 seconds
+      if (now - lastTime < 45000) {
+        return;
+      }
+
+      lastDetectedSubmissions.set(subKey, now);
       handleVerdictDetected(v, node);
       break;
     }

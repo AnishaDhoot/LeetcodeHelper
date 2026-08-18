@@ -407,7 +407,20 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
         update_mastery_on_submission(db, t, is_success=is_success, difficulty=problem.difficulty)
     _record_daily_activity(db, is_success=is_success)
 
-    # 3. Handle success vs failure
+    # 3. Deduplicate rapid duplicate submission calls within 15 seconds for the same problem & code
+    recent_attempt = db.query(Attempt).filter(
+        Attempt.problem_id == problem.id,
+        Attempt.verdict == req.verdict
+    ).order_by(Attempt.id.desc()).first()
+
+    if recent_attempt and (get_utc_now() - recent_attempt.timestamp).total_seconds() < 15 and (recent_attempt.explanation_text and not req.code):
+        return SubmissionAnalyzeResponse(
+            root_cause_category=recent_attempt.root_cause_category or "none",
+            explanation=recent_attempt.explanation_text or "Submission recorded.",
+            suggested_action="Proceed to your next recommended problem."
+        )
+
+    # 4. Handle success vs failure
     if is_success:
         # Save success attempt
         attempt = Attempt(
@@ -1485,17 +1498,29 @@ def submit_mock_solution(req: MockSubmitRequest, db: Session = Depends(get_db)):
     session.time_taken_seconds = elapsed
     db.commit()
 
-    # Perform analysis
-    sub_req = SubmissionAnalyzeRequest(
-        problem_id=req.problem_id,
-        problem_title=req.problem_title,
-        code=req.code,
-        language=req.language,
-        verdict="Accepted",
-        time_taken_seconds=elapsed,
-        hints_used=0
+    # Check if an attempt was already recorded during this session
+    session_attempts = db.query(Attempt).filter(
+        Attempt.problem_id == req.problem_id,
+        Attempt.timestamp >= session.start_time
+    ).all()
+
+    if not session_attempts:
+        sub_req = SubmissionAnalyzeRequest(
+            problem_id=req.problem_id,
+            problem_title=req.problem_title,
+            code=req.code,
+            language=req.language,
+            verdict="Accepted",
+            time_taken_seconds=elapsed,
+            hints_used=0
+        )
+        return analyze_submission(sub_req, db)
+
+    return SubmissionAnalyzeResponse(
+        root_cause_category="none",
+        explanation="Mock interview session completed!",
+        suggested_action="View your mock interview performance report."
     )
-    return analyze_submission(sub_req, db)
 
 
 @app.get("/mock-interview/report")
