@@ -1095,10 +1095,13 @@ export default function App() {
                 <div>
                   <a
                     href={activeTest.problem1.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    target="_self"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      window.location.href = activeTest.problem1.url;
+                    }}
                     className="badge-quest-link"
-                    style={{ fontSize: '13px', fontWeight: '600' }}
+                    style={{ fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
                   >
                     1. {activeTest.problem1.title}
                   </a>
@@ -1119,10 +1122,13 @@ export default function App() {
                 <div>
                   <a
                     href={activeTest.problem2.url}
-                    target="_blank"
-                    rel="noreferrer"
+                    target="_self"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      window.location.href = activeTest.problem2.url;
+                    }}
                     className="badge-quest-link"
-                    style={{ fontSize: '13px', fontWeight: '600' }}
+                    style={{ fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
                   >
                     2. {activeTest.problem2.title}
                   </a>
@@ -1842,7 +1848,11 @@ export default function App() {
                       <a
                         className="rec-item-link"
                         href={rec.url}
-                        target="_top"
+                        target="_self"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          window.location.href = rec.url;
+                        }}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                         Attempt Problem
