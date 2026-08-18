@@ -82,26 +82,19 @@ async function fetchSolvedProblemsViaTab() {
 
       if (solved.length === 0) return { ok: true, problems: [] };
 
-      // ── Step 2: Fetch topic tags via bulk GraphQL or fast concurrent batching ────────────
+      // ── Step 2: Fetch topic tags via instant bulk GraphQL ────────────────────
       const topicMap = new Map();
       try {
         const bulkRes = await fetch("https://leetcode.com/graphql/", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            query: `query problemsetQuestionList {
-              problemsetQuestionList: questionList(categorySlug: "", limit: 4000, skip: 0, filters: {}) {
-                questions: data {
-                  titleSlug
-                  topicTags { name }
-                }
-              }
-            }`
+            query: `query { allQuestions { titleSlug topicTags { name } } }`
           })
         });
         if (bulkRes.ok) {
           const bulkData = await bulkRes.json();
-          const qList = bulkData?.data?.problemsetQuestionList?.questions || [];
+          const qList = bulkData?.data?.allQuestions || [];
           for (const q of qList) {
             if (q.titleSlug && q.topicTags) {
               topicMap.set(q.titleSlug, q.topicTags.map(t => t.name));
@@ -109,7 +102,7 @@ async function fetchSolvedProblemsViaTab() {
           }
         }
       } catch (e) {
-        console.warn("[DSA Tutor] Bulk topic fetch failed, falling back to batching:", e);
+        console.warn("[DSA Tutor] Bulk topic fetch failed:", e);
       }
 
       const missingSlugs = [];
@@ -129,9 +122,9 @@ async function fetchSolvedProblemsViaTab() {
         }
       }
 
-      // Fallback for any missing slugs with fast concurrent batching (BATCH = 20):
+      // Fallback for any rare missing slugs with concurrent batching (BATCH = 50):
       if (missingSlugs.length > 0) {
-        const BATCH = 20;
+        const BATCH = 50;
         for (let i = 0; i < missingSlugs.length; i += BATCH) {
           const chunk = missingSlugs.slice(i, i + BATCH);
           const settled = await Promise.allSettled(
@@ -159,9 +152,6 @@ async function fetchSolvedProblemsViaTab() {
             })
           );
           settled.forEach(r => r.status === "fulfilled" && problems.push(r.value));
-          if (i + BATCH < missingSlugs.length) {
-            await new Promise((res) => setTimeout(res, 20));
-          }
         }
       }
 

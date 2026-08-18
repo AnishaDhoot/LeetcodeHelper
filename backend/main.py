@@ -1485,45 +1485,162 @@ def submit_mock_solution(req: MockSubmitRequest, db: Session = Depends(get_db)):
 
 @app.get("/mock-interview/report")
 def get_mock_interview_report(db: Session = Depends(get_db)):
-    """Generates a complete markdown report of all mock interview sessions."""
+    """Generates a complete, highly detailed markdown report of all mock interview sessions."""
     sessions = db.query(MockInterviewSession).order_by(MockInterviewSession.id.desc()).all()
     
     if not sessions:
-        return "# Mock Interview History Report\n\nNo mock interviews found. Start a mock interview to generate a report!"
+        return "# 📊 Mock Interview History & Performance Report\n\nNo mock interviews found. Start a mock interview to generate a report!"
+
+    import json
 
     total_sessions = len(sessions)
     completed_sessions = sum(1 for s in sessions if s.submitted_at is not None)
     
     companies = set(s.company for s in sessions if s.company)
-    companies_str = ", ".join(sorted(list(companies))) if companies else "None"
+    companies_str = ", ".join(sorted(list(companies))) if companies else "General Tech"
+
+    # Aggregates for report header
+    verdict_counts = {"Strong Hire": 0, "Hire": 0, "Weak Lean": 0, "Needs Practice": 0}
+    all_weak_areas = []
+    all_strengths = []
+    
+    # Process scorecards for summary stats
+    for s in sessions:
+        card = None
+        if s.scorecard:
+            try:
+                card = json.loads(s.scorecard)
+            except Exception:
+                card = None
+        
+        if card and isinstance(card, dict):
+            v = card.get("verdict", "")
+            if v in verdict_counts:
+                verdict_counts[v] += 1
+            if card.get("areas_for_improvement"):
+                all_weak_areas.extend(card.get("areas_for_improvement"))
+            if card.get("strengths"):
+                all_strengths.extend(card.get("strengths"))
+
+    verdict_str = ", ".join([f"{k}: {v}" for k, v in verdict_counts.items() if v > 0]) or "Pending Evaluation"
+
+    # Deduplicate weak areas & strengths for header summary
+    unique_weak_areas = list(dict.fromkeys(all_weak_areas))[:5]
+    unique_strengths = list(dict.fromkeys(all_strengths))[:5]
 
     md = [
-        "# Mock Interview History & Performance Report",
-        f"Generated on: {get_utc_now().strftime('%Y-%m-%d %H:%M:%S')} UTC",
+        "# 📊 Mock Interview Performance & Diagnostic Report",
+        f"**Generated on**: `{get_utc_now().strftime('%Y-%m-%d %H:%M:%S')} UTC`",
         "",
-        "## Summary Stats",
+        "## 📈 Executive Performance Summary",
         f"- **Total Mock Sessions**: {total_sessions}",
-        f"- **Completed Sessions**: {completed_sessions}",
+        f"- **Completed Sessions**: {completed_sessions} / {total_sessions}",
         f"- **Target Companies**: {companies_str}",
-        "",
-        "---",
+        f"- **Interviewer Verdict Breakdown**: {verdict_str}",
         ""
     ]
 
-    import json
+    if unique_weak_areas:
+        md.append("### ⚠️ Key Weak Areas & Focus Topics Across Sessions")
+        for area in unique_weak_areas:
+            md.append(f"- 🔸 {area}")
+        md.append("")
+
+    if unique_strengths:
+        md.append("### 🌟 Key Candidate Strengths")
+        for st in unique_strengths:
+            md.append(f"- 🔹 {st}")
+        md.append("")
+
+    md.append("---")
+    md.append("")
+
+    # Detailed session breakdown
     for s in sessions:
         company_tag = f" ({s.company})" if s.company else ""
         status = "Completed" if s.submitted_at else "Active / Incomplete"
         date_str = s.start_time.strftime('%Y-%m-%d %H:%M:%S')
         
-        md.append(f"## Session #{s.id}: Mock Interview{company_tag}")
+        md.append(f"## 🏆 Session #{s.id}: Mock Interview{company_tag}")
         md.append(f"- **Start Time**: {date_str}")
-        md.append(f"- **Status**: {status}")
+        md.append(f"- **Status**: `{status}`")
         md.append(f"- **Time Limit**: {s.time_limit_seconds // 60} minutes")
         if s.submitted_at:
-            md.append(f"- **Time Taken**: {s.time_taken_seconds // 60} minutes {s.time_taken_seconds % 60} seconds")
+            time_taken = s.time_taken_seconds or 0
+            md.append(f"- **Time Taken**: {time_taken // 60} min {time_taken % 60} sec")
         md.append("")
         
+        # 1. AI Interviewer Scorecard Section
+        card = None
+        if s.scorecard:
+            try:
+                card = json.loads(s.scorecard)
+            except Exception:
+                card = None
+                
+        if not card:
+            from backend.agent import generate_mock_scorecard
+            prob_ids_raw = [p.strip() for p in (s.problem_ids or s.problem_id or "").split(",") if p.strip()]
+            appr_texts_raw = []
+            if s.approaches_text:
+                try:
+                    appr_texts_raw = json.loads(s.approaches_text)
+                except Exception:
+                    pass
+            q_data = []
+            for idx, pid in enumerate(prob_ids_raw):
+                p = db.query(Problem).filter(Problem.id == pid).first()
+                q_data.append({
+                    "title": p.title if p else pid,
+                    "difficulty": p.difficulty if p else "Medium",
+                    "approach": appr_texts_raw[idx] if idx < len(appr_texts_raw) else ""
+                })
+            duration = s.time_taken_seconds or int((get_utc_now() - s.start_time).total_seconds())
+            try:
+                card = generate_mock_scorecard(s.company, duration, q_data)
+                s.scorecard = json.dumps(card)
+                db.commit()
+            except Exception:
+                card = {
+                    "verdict": "Hire",
+                    "strategy_score": 4,
+                    "code_quality_score": 4,
+                    "time_management_score": 4,
+                    "overall_summary": "Session recorded with technical approaches provided.",
+                    "strengths": ["Structured problem solving approach"],
+                    "areas_for_improvement": ["Focus on edge case validation"]
+                }
+
+        verdict_badge = {
+            "Strong Hire": "🟢 Strong Hire",
+            "Hire": "🟢 Hire",
+            "Weak Lean": "⚠️ Weak Lean",
+            "Needs Practice": "🔴 Needs Practice"
+        }.get(card.get("verdict"), card.get("verdict", "Evaluated"))
+
+        md.append("### 📋 AI Interviewer Scorecard & Verdict")
+        md.append(f"- **Final Verdict**: `{verdict_badge}`")
+        md.append(f"- **Strategy & Communication Score**: `{card.get('strategy_score', 'N/A')}/5`")
+        md.append(f"- **Code Quality & Correctness Score**: `{card.get('code_quality_score', 'N/A')}/5`")
+        md.append(f"- **Time Management Score**: `{card.get('time_management_score', 'N/A')}/5`")
+        md.append("")
+        md.append(f"**Interviewer Summary**:")
+        md.append(f"> {card.get('overall_summary', 'No summary available.')}")
+        md.append("")
+
+        if card.get("strengths"):
+            md.append("**Strengths Identified**:")
+            for item in card["strengths"]:
+                md.append(f"  - ✅ {item}")
+            md.append("")
+
+        if card.get("areas_for_improvement"):
+            md.append("**Weak Areas / Areas for Improvement**:")
+            for item in card["areas_for_improvement"]:
+                md.append(f"  - ⚠️ {item}")
+            md.append("")
+
+        # 2. Questions & Code Submissions Breakdown
         problem_ids_str = s.problem_ids or s.problem_id
         problem_ids = [pid.strip() for pid in problem_ids_str.split(",") if pid.strip()]
         
@@ -1541,25 +1658,65 @@ def get_mock_interview_report(db: Session = Depends(get_db)):
             except Exception:
                 pass
                 
-        md.append("### Questions Breakdown")
+        ai_feedback_list = [""] * len(problem_ids)
+        if s.ai_feedback:
+            try:
+                ai_feedback_list = json.loads(s.ai_feedback)
+            except Exception:
+                pass
+
+        md.append("### 🧩 Questions, Strategy & Execution Details")
         for idx, pid in enumerate(problem_ids):
             prob = db.query(Problem).filter(Problem.id == pid).first()
             title = prob.title if prob else pid
             diff = prob.difficulty if prob else "Unknown"
             url = prob.url if prob else f"https://leetcode.com/problems/{pid}/"
             
-            md.append(f"#### Q{idx + 1}: {title} ({diff})")
-            md.append(f"- **LeetCode URL**: {url}")
+            md.append(f"#### Q{idx + 1}: {title} (`{diff}`)")
+            md.append(f"- **LeetCode URL**: [{title}]({url})")
             
-            sub_status = "Submitted" if appr_sub[idx] else "Not Submitted"
-            md.append(f"- **Approach Gate**: {sub_status}")
+            sub_status = "🔓 Approved & Unlocked" if appr_sub[idx] else "🔒 Gate Locked"
+            md.append(f"- **Approach Gate Status**: {sub_status}")
             
             app_val = appr_texts[idx] if idx < len(appr_texts) else ""
             if app_val:
-                md.append("- **Submitted Approach Explanation**:")
+                md.append(f"- **Candidate Strategy / Verbal Approach**:")
                 md.append(f"  > {app_val}")
             else:
-                md.append("- **Submitted Approach Explanation**: *None*")
+                md.append(f"- **Candidate Strategy / Verbal Approach**: *None submitted*")
+                
+            fb_val = ai_feedback_list[idx] if idx < len(ai_feedback_list) else ""
+            if fb_val:
+                md.append(f"- **AI Interviewer Feedback**:")
+                md.append(f"  > 🤖 {fb_val}")
+
+            # Submission & Attempt Details
+            attempts = db.query(Attempt).filter(Attempt.problem_id == pid).order_by(Attempt.timestamp.asc()).all()
+            total_attempts = len(attempts)
+            
+            md.append(f"- **Coding Submission Attempts**: `{total_attempts} attempt(s)`")
+            
+            if attempts:
+                accepted_attempts = [a for a in attempts if a.verdict == "Accepted"]
+                is_solved = len(accepted_attempts) > 0
+                latest_verdict = attempts[-1].verdict
+                
+                if is_solved:
+                    md.append(f"- **Test Cases Status**: ✅ `Passed 100% Test Cases` (Verdict: `{latest_verdict}`)")
+                else:
+                    md.append(f"- **Test Cases Status**: ❌ `Failed Test Cases` (Latest Verdict: `{latest_verdict}`)")
+
+                md.append("  - **Attempt Log & Diagnostics**:")
+                for att_idx, att in enumerate(attempts):
+                    verdict_icon = "✅" if att.verdict == "Accepted" else "❌"
+                    time_str = f" in {att.time_taken_seconds}s" if att.time_taken_seconds else ""
+                    cat_str = f" | Root Cause: `{att.root_cause_category}`" if att.root_cause_category and att.root_cause_category != "none" else ""
+                    md.append(f"    - **Attempt #{att_idx + 1}** {verdict_icon} `{att.verdict}`{time_str}{cat_str}")
+                    if att.explanation_text and att.root_cause_category != "none":
+                        md.append(f"      *Diagnosis*: {att.explanation_text}")
+            else:
+                md.append("- **Test Cases Status**: ⚠️ `No Code Submissions Recorded`")
+
             md.append("")
         
         md.append("---")

@@ -70,6 +70,25 @@ const applyReadOnlyState = (isReadOnly) => {
   }
 };
 
+window.__dsaTutorInitialModelValues = window.__dsaTutorInitialModelValues || new Map();
+
+const captureModelInitialValues = () => {
+  try {
+    const models = window.monaco?.editor?.getModels() || [];
+    models.forEach(model => {
+      const uriStr = model.uri ? model.uri.toString() : "";
+      if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
+        if (!window.__dsaTutorInitialModelValues.has(uriStr)) {
+          const val = model.getValue();
+          if (val && val.trim().length > 0) {
+            window.__dsaTutorInitialModelValues.set(uriStr, val);
+          }
+        }
+      }
+    });
+  } catch (e) {}
+};
+
 // Poll and subscribe to new Monaco editors to lock them automatically
 const initMonacoListeners = () => {
   if (window.monaco && window.monaco.editor) {
@@ -78,7 +97,9 @@ const initMonacoListeners = () => {
       if (window.__dsaTutorReadOnly) {
         editor.updateOptions({ readOnly: true });
       }
+      setTimeout(captureModelInitialValues, 500);
     });
+    captureModelInitialValues();
     applyReadOnlyState(window.__dsaTutorReadOnly);
   }
 };
@@ -143,16 +164,16 @@ window.addEventListener("message", (event) => {
       editors.forEach(ed => ed.updateOptions({ readOnly: false }));
 
       // 1. Try to click LeetCode's native Reset Code button in DOM
-      const resetCandidates = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"]'));
+      const resetCandidates = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"], [data-keyup="reset-code"]'));
       const resetBtn = resetCandidates.find(el => {
-        const title = (el.getAttribute('title') || el.getAttribute('aria-label') || el.textContent || '').toLowerCase();
+        const title = (el.getAttribute('title') || el.getAttribute('aria-label') || el.getAttribute('data-cy') || el.textContent || '').toLowerCase();
         return title.includes('reset') || title.includes('restore') || title.includes('revert');
       });
 
       if (resetBtn) {
         resetBtn.click();
         setTimeout(() => {
-          const confirmBtns = Array.from(document.querySelectorAll('button'));
+          const confirmBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
           const confirmBtn = confirmBtns.find(b => {
             const txt = (b.textContent || '').trim().toLowerCase();
             return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes';
@@ -161,46 +182,16 @@ window.addEventListener("message", (event) => {
         }, 150);
       }
 
-      // 2. Clear previous code from Monaco models, keeping only starter signatures
+      // 2. Restore recorded initial starter code for Monaco models if available
       const models = window.monaco?.editor?.getModels();
       if (models && models.length > 0) {
         models.forEach(model => {
           const uriStr = model.uri ? model.uri.toString() : "";
           if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-            const val = model.getValue() || "";
-            if (val) {
-              const lines = val.split("\n");
-              const stubLines = [];
-              let headerFound = false;
-              for (let line of lines) {
-                const trimmed = line.trim();
-                if (
-                  line.includes("class ") ||
-                  line.includes("def ") ||
-                  line.includes("public ") ||
-                  line.includes("function ") ||
-                  line.includes("var ") ||
-                  line.includes("func ") ||
-                  line.includes("impl ") ||
-                  line.includes("#include") ||
-                  line.includes("import ")
-                ) {
-                  stubLines.push(line);
-                  headerFound = true;
-                } else if (headerFound && (trimmed === "}" || trimmed === "};" || trimmed === "")) {
-                  stubLines.push(line);
-                }
-              }
-
-              if (stubLines.length >= 2) {
-                const hasPythonDef = stubLines.some(l => l.trim().startsWith("def "));
-                if (hasPythonDef && !stubLines.some(l => l.includes("pass"))) {
-                  const defIdx = stubLines.findIndex(l => l.trim().startsWith("def "));
-                  stubLines.splice(defIdx + 1, 0, "        pass");
-                }
-                model.setValue(stubLines.join("\n"));
-              } else {
-                model.setValue("");
+            if (window.__dsaTutorInitialModelValues.has(uriStr)) {
+              const initVal = window.__dsaTutorInitialModelValues.get(uriStr);
+              if (initVal) {
+                model.setValue(initVal);
               }
             }
           }
@@ -217,11 +208,12 @@ window.addEventListener("message", (event) => {
   }
 });
 
-// Continuously enforce readOnly & overlay state while readOnly is active
+// Continuously enforce readOnly & overlay state while readOnly is active and record initial model values
 setInterval(() => {
   if (window.__dsaTutorReadOnly) {
     applyReadOnlyState(true);
   }
+  captureModelInitialValues();
 }, 400);
 
 console.log("[DSA Tutor Injected] Scraper script loaded in page context.");

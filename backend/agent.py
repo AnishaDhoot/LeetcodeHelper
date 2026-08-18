@@ -18,7 +18,7 @@ def get_groq_api_key() -> str:
     return key.strip() if key else ""
 
 def get_groq_model() -> str:
-    return os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+    return os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
 def get_ollama_model() -> str:
     return os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
@@ -45,22 +45,41 @@ def query_groq(prompt: str, system_prompt: str) -> str:
     api_key = get_groq_api_key()
     if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is not set")
-    try:
-        client = Groq(api_key=api_key)
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            model=get_groq_model(),
-            temperature=0.2,
-            max_tokens=1024,
-            response_format={"type": "json_object"}
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        print(f"Error querying Groq: {e}")
-        raise e
+    
+    client = Groq(api_key=api_key)
+    target_model = get_groq_model()
+    candidate_models = [target_model, "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"]
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    models_to_try = [m for m in candidate_models if not (m in seen or seen.add(m))]
+
+    last_exception = None
+    for model in models_to_try:
+        try:
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                temperature=0.2,
+                max_tokens=1024,
+                response_format={"type": "json_object"}
+            )
+            return chat_completion.choices[0].message.content
+        except Exception as e:
+            err_msg = str(e)
+            print(f"Error querying Groq with model '{model}': {e}")
+            last_exception = e
+            # Only retry next model if it's a model not found / 404 error
+            if "model_not_found" in err_msg or "404" in err_msg or "does not exist" in err_msg:
+                continue
+            else:
+                raise e
+
+    if last_exception:
+        raise last_exception
 
 def clean_json_string(response_text: str) -> str:
     """Cleans code blocks or other wrapper text around JSON from the response."""
