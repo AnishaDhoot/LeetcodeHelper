@@ -89,16 +89,59 @@ const captureModelInitialValues = () => {
   } catch (e) {}
 };
 
+// Monkey-patch Monaco model setValue to prevent LeetCode from injecting past solutions during assessments
+const patchMonacoModel = (model) => {
+  if (!model || model.__dsaPatched) return;
+  model.__dsaPatched = true;
+
+  const originalSetValue = model.setValue.bind(model);
+  model.setValue = function(newValue) {
+    if (window.__dsaTutorAssessmentLocked || window.__dsaTutorReadOnly) {
+      const uriStr = model.uri ? model.uri.toString() : "";
+      if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
+        const cleaned = cleanStarterCode(newValue);
+        return originalSetValue(cleaned);
+      }
+    }
+    return originalSetValue(newValue);
+  };
+
+  if (window.__dsaTutorAssessmentLocked || window.__dsaTutorReadOnly) {
+    const uriStr = model.uri ? model.uri.toString() : "";
+    if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
+      const current = model.getValue();
+      if (current) {
+        const cleaned = cleanStarterCode(current);
+        if (cleaned !== current) {
+          originalSetValue(cleaned);
+        }
+      }
+    }
+  }
+};
+
 // Poll and subscribe to new Monaco editors to lock them automatically
 const initMonacoListeners = () => {
   if (window.monaco && window.monaco.editor) {
-    // Intercept future editor creations
+    const models = window.monaco.editor.getModels() || [];
+    models.forEach(patchMonacoModel);
+
+    // Intercept future editor and model creations
     window.monaco.editor.onDidCreateEditor((editor) => {
       if (window.__dsaTutorReadOnly) {
         editor.updateOptions({ readOnly: true });
       }
+      const model = editor.getModel();
+      if (model) patchMonacoModel(model);
       setTimeout(captureModelInitialValues, 500);
     });
+
+    if (window.monaco.editor.onDidCreateModel) {
+      window.monaco.editor.onDidCreateModel((model) => {
+        patchMonacoModel(model);
+      });
+    }
+
     captureModelInitialValues();
     applyReadOnlyState(window.__dsaTutorReadOnly);
   }
@@ -114,9 +157,33 @@ const pollInterval = setInterval(() => {
 window.__dsaTutorAssessmentLocked = false;
 window.__dsaTutorLockReason = "";
 
+const injectLockCSS = (isLocked) => {
+  let styleEl = document.getElementById("dsa-tutor-fairplay-css");
+  if (isLocked) {
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "dsa-tutor-fairplay-css";
+      styleEl.textContent = `
+        a[href*="/solutions"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/submissions"],
+        a[href*="/solutions/"], a[href*="/editorial/"], a[href*="/discussion/"], a[href*="/submissions/"],
+        div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="submissions"] {
+          display: none !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+      `;
+      document.head.appendChild(styleEl);
+    }
+  } else {
+    if (styleEl) styleEl.remove();
+  }
+};
+
 const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
   window.__dsaTutorAssessmentLocked = !!isLocked;
   window.__dsaTutorLockReason = reason || "Assessment Mode";
+
+  injectLockCSS(isLocked);
 
   try {
     const pathname = window.location.pathname.toLowerCase();
@@ -124,18 +191,26 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
       pathname.includes("/solutions") ||
       pathname.includes("/editorial") ||
       pathname.includes("/discussion") ||
+      pathname.includes("/submissions") ||
       pathname.includes("/community")
     );
 
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
 
+    if (window.monaco?.editor?.getModels) {
+      const models = window.monaco.editor.getModels();
+      models.forEach(patchMonacoModel);
+    }
+
     if (isLocked) {
-      // Find all tab links / buttons matching Solutions, Editorial, or Discussion
-      const allTabsAndLinks = Array.from(
-        document.querySelectorAll('a, button, div[role="tab"], div[data-layout-path], span[role="button"]')
+      // Find all tab links / buttons matching Solutions, Editorial, Discussion, or Submissions
+      const allElements = Array.from(
+        document.querySelectorAll('a, button, div, span, li')
       );
 
-      allTabsAndLinks.forEach(el => {
+      allElements.forEach(el => {
+        if (el.children.length > 5) return;
+
         const text = (el.textContent || "").trim().toLowerCase();
         const href = (el.getAttribute("href") || "").toLowerCase();
         const dataPath = (el.getAttribute("data-layout-path") || "").toLowerCase();
@@ -143,22 +218,25 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
 
         const isForbiddenTab = (
           text === "editorial" || text === "solutions" || text === "solution" || text === "discussion" || text === "discussions" ||
+          text === "submissions" || text === "submission" || text === "my submissions" ||
           text.includes("official solution") || text.includes("community solutions") ||
-          href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") ||
-          dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") ||
-          idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion")
+          href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/submissions") ||
+          dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("submissions") ||
+          idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("submissions")
         );
 
         if (isForbiddenTab) {
           el.style.setProperty("display", "none", "important");
+          el.style.setProperty("visibility", "hidden", "important");
+          el.style.setProperty("pointer-events", "none", "important");
           el.setAttribute("data-dsa-tab-locked", "true");
         }
       });
 
-      // If user is currently on an Editorial/Solutions/Discussion URL route or panel:
+      // If user is currently on an Editorial/Solutions/Discussion/Submissions URL route or panel:
       if (isForbiddenRoute) {
         // Try to click the Description / Problem tab to revert
-        const descTab = allTabsAndLinks.find(el => {
+        const descTab = Array.from(document.querySelectorAll('a, button, div, span')).find(el => {
           const txt = (el.textContent || "").trim().toLowerCase();
           const href = (el.getAttribute("href") || "").toLowerCase();
           return txt === "description" || txt === "problem" || href.includes("/description");
@@ -169,7 +247,7 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
 
         // Add a cover overlay over the solutions / editorial container if rendered
         const panelContainer = document.querySelector(
-          "[class*='editorial'], [class*='solution'], [class*='discussion'], div[data-track-load='editorial_content'], div[class*='description-container']"
+          "[class*='editorial'], [class*='solution'], [class*='discussion'], [class*='submission'], div[data-track-load='editorial_content'], div[class*='description-container']"
         ) || document.querySelector("#qd-content, .flex-col");
 
         if (panelContainer && !document.getElementById("dsa-tutor-tab-lock-overlay")) {
@@ -196,9 +274,9 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
           lockOverlay.innerHTML = `
             <div style="background: #18181b; border: 1px solid #27272a; padding: 24px 32px; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); text-align: center; max-width: 360px;">
               <div style="font-size: 32px; margin-bottom: 8px;">🔒</div>
-              <div style="font-size: 15px; font-weight: 700; color: #ef4444; margin-bottom: 8px;">Solutions, Editorial & Discussion Locked</div>
+              <div style="font-size: 15px; font-weight: 700; color: #ef4444; margin-bottom: 8px;">Solutions, Editorial, Discussion & Submissions Locked</div>
               <div style="font-size: 12px; color: #a1a1aa; line-height: 1.5;">
-                Access to official solutions, editorials, and community discussions is disabled during <strong>${reason}</strong> to maintain test integrity.
+                Access to official solutions, editorials, community discussions, and past submissions is disabled during <strong>${reason}</strong> to maintain test integrity.
               </div>
             </div>
           `;
@@ -215,6 +293,8 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
 
       document.querySelectorAll('[data-dsa-tab-locked="true"]').forEach(el => {
         el.style.removeProperty("display");
+        el.style.removeProperty("visibility");
+        el.style.removeProperty("pointer-events");
         el.removeAttribute("data-dsa-tab-locked");
       });
     }
@@ -223,12 +303,12 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
   }
 };
 
-// Intercept clicks on Solutions / Editorial / Discussion tabs when locked
+// Intercept clicks on Solutions / Editorial / Discussion / Submissions tabs when locked
 document.addEventListener("click", (e) => {
   if (!window.__dsaTutorAssessmentLocked) return;
 
   const target = e.target;
-  const closestNav = target ? target.closest("a, button, [role='tab'], div") : null;
+  const closestNav = target ? target.closest("a, button, [role='tab'], div, span, li") : null;
   if (!closestNav) return;
 
   const text = (closestNav.textContent || "").trim().toLowerCase();
@@ -237,9 +317,10 @@ document.addEventListener("click", (e) => {
 
   const isForbidden = (
     text === "editorial" || text === "solutions" || text === "solution" || text === "discussion" || text === "discussions" ||
+    text === "submissions" || text === "submission" || text === "my submissions" ||
     text.includes("official solution") || text.includes("community solutions") ||
-    href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") ||
-    dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion")
+    href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/submissions") ||
+    dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("submissions")
   );
 
   if (isForbidden) {
