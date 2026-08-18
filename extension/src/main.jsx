@@ -261,6 +261,18 @@ const handleVerdictDetected = async (verdict, node) => {
   });
 };
 
+let lastSubmitClickTimestamp = 0;
+
+document.addEventListener('click', (e) => {
+  const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"]') : null;
+  if (!btn) return;
+  const txt = (btn.textContent || '').trim().toLowerCase();
+  const locator = btn.getAttribute('data-e2e-locator') || '';
+  if (txt.includes('submit') || txt.includes('run') || locator.includes('submit')) {
+    lastSubmitClickTimestamp = Date.now();
+  }
+}, true);
+
 const processedVerdictNodes = new WeakSet();
 const lastDetectedSubmissions = new Map();
 
@@ -275,14 +287,20 @@ const checkNodeForVerdict = (node) => {
   for (const v of verdicts) {
     // Only match small text leaves (like status badges) to avoid match triggers on large parent divs.
     if (text === v || (text.includes(v) && text.length < 40)) {
+      // Mark element as processed immediately
+      processedVerdictNodes.add(node);
+      try { node.dataset.dsaProcessed = "true"; } catch (e) {}
+
+      // Ignore pre-existing past historical submission badges rendered on page load (unless user clicked Submit in last 60s)
+      const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
+      if (lastSubmitClickTimestamp === 0 || timeSinceSubmit > 60000) {
+        return;
+      }
+
       const { problemId } = scrapeProblemIdentity();
       const subKey = `${problemId}_${v}`;
       const now = Date.now();
       const lastTime = lastDetectedSubmissions.get(subKey) || 0;
-
-      // Mark element as processed immediately
-      processedVerdictNodes.add(node);
-      try { node.dataset.dsaProcessed = "true"; } catch (e) {}
 
       // Suppress duplicate triggers for the same problem + verdict within 45 seconds
       if (now - lastTime < 45000) {

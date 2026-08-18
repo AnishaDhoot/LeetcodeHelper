@@ -375,10 +375,10 @@ def test_mock_interview():
     assert app_res.status_code == 200
     assert app_res.json()["status"] in ["approach_accepted", "approach_rejected"]
 
-    # Verify approach_submitted updates to True
+    # Verify approach_submitted updates according to approval status
     active_submitted = client.get("/mock-interview/active")
     assert active_submitted.status_code == 200
-    assert active_submitted.json()["approach_submitted"] is True
+    assert active_submitted.json()["approach_submitted"] == (app_res.json()["status"] == "approach_accepted")
 
     # Test AI quota endpoint
     quota_res = client.get("/ai/quota")
