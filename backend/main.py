@@ -628,11 +628,12 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     else:
         targets = ["Hard"]
 
-    candidates = [p for p in problems if p.difficulty in targets]
+    candidates = [p for p in problems if p.difficulty in targets and not p.is_premium]
     if len(candidates) < 2:
-        candidates = problems
+        candidates = [p for p in problems if not p.is_premium]
     if len(candidates) < 2:
         candidates = filter_problems_for_topic(db.query(Problem).filter(Problem.is_premium == False).all(), req.topic)
+        candidates = [p for p in candidates if not p.is_premium]
 
     import random
     selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]

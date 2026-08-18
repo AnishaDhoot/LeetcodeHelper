@@ -287,9 +287,9 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
             })
             due_problem_ids.add(prob.id)
 
-    # 2. Build base problem pool (optionally filtered by company — Tier 1.1)
+    # 2. Build base problem pool (strictly non-premium — Tier 1.1)
     def _pool_query():
-        q = db.query(Problem)
+        q = db.query(Problem).filter(Problem.is_premium == False)
         if company:
             q = q.filter(Problem.companies.like(f"%{company}%"))
         return q.all()
