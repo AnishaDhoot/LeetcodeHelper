@@ -699,9 +699,22 @@ export default function App() {
     return () => clearInterval(t);
   }, [isMockMode, mockSession]);
 
-  // Enforce editor locking and clear previous solution attempts during Mock Interview mode
+  // Enforce editor locking and clear previous solution attempts during Mock Interview & Badge Test modes
   useEffect(() => {
-    if (isMockMode && !mockApproachSubmitted) {
+    if (activeTest) {
+      if (window.dsaTutor?.setEditorReadOnly) {
+        window.dsaTutor.setEditorReadOnly(false);
+      }
+      if (window.dsaTutor?.resetEditor) {
+        window.dsaTutor.resetEditor();
+      }
+      const t1 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 800);
+      const t2 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 2000);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    } else if (isMockMode && !mockApproachSubmitted) {
       if (window.dsaTutor?.setEditorReadOnly) {
         window.dsaTutor.setEditorReadOnly(true);
       }
@@ -725,12 +738,12 @@ export default function App() {
       if (window.dsaTutor?.setEditorReadOnly) {
         window.dsaTutor.setEditorReadOnly(false);
       }
-    } else if (!isMockMode) {
+    } else if (!isMockMode && !activeTest) {
       if (window.dsaTutor?.setEditorReadOnly) {
         window.dsaTutor.setEditorReadOnly(false);
       }
     }
-  }, [isMockMode, mockApproachSubmitted, mockSession?.current_question_index]);
+  }, [activeTest, isMockMode, mockApproachSubmitted, mockSession?.current_question_index]);
 
   // Active Badge Test countdown timer
   useEffect(() => {

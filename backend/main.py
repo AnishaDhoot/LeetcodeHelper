@@ -441,31 +441,43 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
             suggested_action="View the recommendation tab for your next challenge!"
         )
 
-    # For failures, run the LLM diagnosis if within quota
-    has_quota = True
-    try:
-        check_and_increment_ai_quota(db, increment=True)
-    except HTTPException as e:
-        if e.status_code == 429:
-            has_quota = False
-        else:
-            raise e
+    # For failures, check if an assessment (Badge Test or Mock Interview) is active
+    active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    mock_session = db.query(MockInterviewSession).filter(MockInterviewSession.submitted_at.is_(None)).order_by(MockInterviewSession.id.desc()).first()
+    is_mock_active = mock_session and (get_utc_now() - mock_session.start_time).total_seconds() <= mock_session.time_limit_seconds
 
-    if has_quota:
-        diagnosis = generate_diagnosis(
-            problem_title=problem.title,
-            code=req.code,
-            language=req.language,
-            verdict=req.verdict,
-            error_details=req.error_details,
-            test_cases=req.test_cases
-        )
-    else:
+    if active_test or is_mock_active:
         diagnosis = {
-            "root_cause_category": "quota_exceeded",
-            "explanation": "Daily AI request limit reached. Failure diagnostics are locked until tomorrow.",
-            "suggested_action": "Keep practicing! You can still submit attempts, but AI diagnosis is currently disabled."
+            "root_cause_category": "assessment_locked",
+            "explanation": f"AI failure diagnosis is disabled during active {'Badge Tests' if active_test else 'Mock Interviews'} to maintain test integrity.",
+            "suggested_action": "Focus on debugging your solution directly in the code editor."
         }
+    else:
+        # Run the LLM diagnosis if within quota
+        has_quota = True
+        try:
+            check_and_increment_ai_quota(db, increment=True)
+        except HTTPException as e:
+            if e.status_code == 429:
+                has_quota = False
+            else:
+                raise e
+
+        if has_quota:
+            diagnosis = generate_diagnosis(
+                problem_title=problem.title,
+                code=req.code,
+                language=req.language,
+                verdict=req.verdict,
+                error_details=req.error_details,
+                test_cases=req.test_cases
+            )
+        else:
+            diagnosis = {
+                "root_cause_category": "quota_exceeded",
+                "explanation": "Daily AI request limit reached. Failure diagnostics are locked until tomorrow.",
+                "suggested_action": "Keep practicing! You can still submit attempts, but AI diagnosis is currently disabled."
+            }
 
     # Save failed attempt
     attempt = Attempt(
