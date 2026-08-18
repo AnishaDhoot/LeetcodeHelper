@@ -164,10 +164,10 @@ const injectLockCSS = (isLocked) => {
       styleEl = document.createElement("style");
       styleEl.id = "dsa-tutor-fairplay-css";
       styleEl.textContent = `
-        a[href*="/solutions"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/submissions"], a[href*="/comments"], a[href*="/community"],
-        a[href*="/solutions/"], a[href*="/editorial/"], a[href*="/discussion/"], a[href*="/discussions/"], a[href*="/submissions/"], a[href*="/comments/"], a[href*="/community/"],
-        div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="submissions"], div[data-layout-path*="community"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"], [data-track-load*="submission"], [data-track-load*="comment"],
+        a[href*="/solutions"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"],
+        a[href$="/submissions"], a[href$="/submissions/"],
+        div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"], [data-track-load*="comment"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
         section[class*="discussion"], section[class*="comment"], section[class*="community"],
         [id*="discussion"], [id*="discussions"], [id*="comment"], [id*="comments"] {
@@ -192,12 +192,13 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
 
   try {
     const pathname = window.location.pathname.toLowerCase();
+    // Allow active submission detail (/submissions/detail/...) so verdict displays cleanly
     const isForbiddenRoute = (
       pathname.includes("/solutions") ||
       pathname.includes("/editorial") ||
       pathname.includes("/discussion") ||
       pathname.includes("/discussions") ||
-      pathname.includes("/submissions") ||
+      (pathname.includes("/submissions") && !pathname.includes("/submissions/detail")) ||
       pathname.includes("/community") ||
       pathname.includes("/comments")
     );
@@ -210,12 +211,20 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
     }
 
     if (isLocked) {
-      // Find all elements matching Solutions, Editorial, Discussion, Submissions, Comments, or Community
+      // Find all elements matching Solutions, Editorial, Discussion, Submissions History, Comments, or Community
       const allElements = Array.from(
         document.querySelectorAll('a, button, div, span, li, section, [role="tab"]')
       );
 
       allElements.forEach(el => {
+        // Do not hide active submission result panel or code editor
+        if (el.closest('[class*="submission-result"], [class*="result-"], [class*="monaco-editor"], #qd-content')) {
+          const classStr = (typeof el.className === "string" ? el.className : "").toLowerCase();
+          if (classStr.includes("result") || classStr.includes("accepted") || classStr.includes("wrong") || classStr.includes("runtime")) {
+            return;
+          }
+        }
+
         const text = (el.textContent || "").trim().toLowerCase();
         const href = (el.getAttribute("href") || "").toLowerCase();
         const dataPath = (el.getAttribute("data-layout-path") || "").toLowerCase();
@@ -226,18 +235,17 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         // Check tab headers and links
         const isForbiddenTab = (
           text === "editorial" || text === "solutions" || text === "solution" || text === "discussion" || text === "discussions" ||
-          text === "submissions" || text === "submission" || text === "my submissions" || text === "comments" || text === "comment" || text === "community" ||
+          text === "submissions" || text === "submitting..." || text === "comments" || text === "comment" || text === "community" ||
           text.includes("official solution") || text.includes("community solutions") || text.startsWith("discussion (") || text.startsWith("discussions (") || text.startsWith("comments (") ||
-          href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/discussions") || href.includes("/submissions") || href.includes("/comments") || href.includes("/community") ||
-          dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("discussions") || dataPath.includes("submissions") || dataPath.includes("community") ||
-          idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("discussions") || idStr.includes("submissions") || idStr.includes("comment") ||
-          ariaLabel.includes("discussion") || ariaLabel.includes("solution") || ariaLabel.includes("editorial") || ariaLabel.includes("submission") || ariaLabel.includes("comment")
+          href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/discussions") || (href.includes("/submissions") && !href.includes("/submissions/detail")) || href.includes("/comments") || href.includes("/community") ||
+          dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("discussions") || dataPath.includes("community") ||
+          (idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("discussions") || idStr.includes("comment")) && !idStr.includes("editor")
         );
 
         // Check if element is a comment / discussion block section
         const isCommentOrDiscussionBlock = (
           (classStr.includes("discussion") || classStr.includes("comment") || classStr.includes("community")) &&
-          !classStr.includes("description-container") && !classStr.includes("monaco") && !classStr.includes("problem")
+          !classStr.includes("description-container") && !classStr.includes("monaco") && !classStr.includes("problem") && !classStr.includes("result")
         );
 
         if (isForbiddenTab || isCommentOrDiscussionBlock) {
@@ -249,7 +257,7 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         }
       });
 
-      // If user is currently on an Editorial/Solutions/Discussion/Submissions URL route or panel:
+      // If user is currently on an Editorial/Solutions/Discussion URL route:
       if (isForbiddenRoute) {
         // Try to click the Description / Problem tab to revert
         const descTab = Array.from(document.querySelectorAll('a, button, div, span, [role="tab"]')).find(el => {
@@ -261,10 +269,10 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
           descTab.click();
         }
 
-        // Add a cover overlay over the solutions / editorial container if rendered
+        // Only add overlay to forbidden tab content panel (never to main #qd-content)
         const panelContainer = document.querySelector(
-          "[class*='editorial'], [class*='solution'], [class*='discussion'], [class*='discussions'], [class*='submission'], [class*='comment'], div[data-track-load='editorial_content'], div[class*='description-container']"
-        ) || document.querySelector("#qd-content, .flex-col");
+          "div[data-layout-path*='editorial'], div[data-layout-path*='solutions'], div[data-layout-path*='discussion']"
+        );
 
         if (panelContainer && !document.getElementById("dsa-tutor-tab-lock-overlay")) {
           lockOverlay = document.createElement("div");
@@ -290,7 +298,7 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
           lockOverlay.innerHTML = `
             <div style="background: #18181b; border: 1px solid #27272a; padding: 24px 32px; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); text-align: center; max-width: 360px;">
               <div style="font-size: 32px; margin-bottom: 8px;">🔒</div>
-              <div style="font-size: 15px; font-weight: 700; color: #ef4444; margin-bottom: 8px;">Solutions, Editorial, Discussion & Submissions Locked</div>
+              <div style="font-size: 15px; font-weight: 700; color: #ef4444; margin-bottom: 8px;">Solutions, Editorial & Discussion Locked</div>
               <div style="font-size: 12px; color: #a1a1aa; line-height: 1.5;">
                 Access to official solutions, editorials, community discussions, and past submissions is disabled during <strong>${reason}</strong> to maintain test integrity.
               </div>
