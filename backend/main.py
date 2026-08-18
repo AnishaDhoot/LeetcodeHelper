@@ -1178,10 +1178,17 @@ def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
             Problem.companies.like(f"%{req.company}%"),
             Problem.is_premium == False
         ).all()
-        if len(company_probs) >= 3:
+        if len(company_probs) >= 15:
             candidate_pool = company_probs
         else:
-            candidate_pool = db.query(Problem).filter(Problem.is_premium == False).all()
+            # Combine specific company problems with general non-premium problem pool to ensure rich variety
+            all_non_prem = db.query(Problem).filter(Problem.is_premium == False).all()
+            # Order company_probs first, followed by general problems
+            seen = set()
+            for p in company_probs + all_non_prem:
+                if p.id not in seen:
+                    seen.add(p.id)
+                    candidate_pool.append(p)
     else:
         candidate_pool = db.query(Problem).filter(Problem.is_premium == False).all()
 

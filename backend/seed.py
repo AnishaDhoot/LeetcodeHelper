@@ -854,7 +854,11 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Design Hit Counter", "slug": "design-hit-counter", "difficulty": "Medium" },
         { "title": "Task Scheduler", "slug": "task-scheduler", "difficulty": "Medium" },
-        { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" }
+        { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
+        { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" }
       ]
     },
     {
@@ -862,7 +866,12 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
         { "title": "Best Time to Buy and Sell Stock", "slug": "best-time-to-buy-and-sell-stock", "difficulty": "Easy" },
-        { "title": "Design Underground System", "slug": "design-underground-system", "difficulty": "Medium" }
+        { "title": "Design Underground System", "slug": "design-underground-system", "difficulty": "Medium" },
+        { "title": "Longest Substring Without Repeating Characters", "slug": "longest-substring-without-repeating-characters", "difficulty": "Medium" },
+        { "title": "Merge Two Sorted Lists", "slug": "merge-two-sorted-lists", "difficulty": "Easy" },
+        { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" },
+        { "title": "Reverse Linked List", "slug": "reverse-linked-list", "difficulty": "Easy" },
+        { "title": "Coin Change", "slug": "coin-change", "difficulty": "Medium" }
       ]
     },
     {
@@ -870,7 +879,10 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Merge k Sorted Lists", "slug": "merge-k-sorted-lists", "difficulty": "Hard" },
         { "title": "Design Circular Deque", "slug": "design-circular-deque", "difficulty": "Medium" },
-        { "title": "Number of Connected Components in an Undirected Graph", "slug": "number-of-connected-components-in-an-undirected-graph", "difficulty": "Medium" }
+        { "title": "Number of Connected Components in an Undirected Graph", "slug": "number-of-connected-components-in-an-undirected-graph", "difficulty": "Medium" },
+        { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" }
       ]
     },
     {
@@ -878,7 +890,10 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Reverse Bits", "slug": "reverse-bits", "difficulty": "Easy" },
         { "title": "Single Number", "slug": "single-number", "difficulty": "Easy" },
-        { "title": "Sliding Window Maximum", "slug": "sliding-window-maximum", "difficulty": "Hard" }
+        { "title": "Sliding Window Maximum", "slug": "sliding-window-maximum", "difficulty": "Hard" },
+        { "title": "Counting Bits", "slug": "counting-bits", "difficulty": "Easy" },
+        { "title": "Rotate Image", "slug": "rotate-image", "difficulty": "Medium" },
+        { "title": "Power of Two", "slug": "power-of-two", "difficulty": "Easy" }
       ]
     },
     {
@@ -886,7 +901,9 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Rotate Image", "slug": "rotate-image", "difficulty": "Medium" },
         { "title": "Spiral Matrix", "slug": "spiral-matrix", "difficulty": "Medium" },
-        { "title": "Set Matrix Zeroes", "slug": "set-matrix-zeroes", "difficulty": "Medium" }
+        { "title": "Set Matrix Zeroes", "slug": "set-matrix-zeroes", "difficulty": "Medium" },
+        { "title": "Word Search", "slug": "word-search", "difficulty": "Medium" },
+        { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" }
       ]
     },
     {
@@ -895,7 +912,14 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Valid Anagram", "slug": "valid-anagram", "difficulty": "Easy" },
         { "title": "Reverse Words in a String", "slug": "reverse-words-in-a-string", "difficulty": "Medium" },
-        { "title": "Implement Stack using Queues", "slug": "implement-stack-using-queues", "difficulty": "Easy" }
+        { "title": "Implement Stack using Queues", "slug": "implement-stack-using-queues", "difficulty": "Easy" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
+        { "title": "Remove Duplicates from Sorted Array", "slug": "remove-duplicates-from-sorted-array", "difficulty": "Easy" },
+        { "title": "Move Zeroes", "slug": "move-zeroes", "difficulty": "Easy" },
+        { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" },
+        { "title": "Reverse Linked List", "slug": "reverse-linked-list", "difficulty": "Easy" },
+        { "title": "Longest Common Prefix", "slug": "longest-common-prefix", "difficulty": "Easy" },
+        { "title": "Sort Colors", "slug": "sort-colors", "difficulty": "Medium" }
       ]
     },
     {
@@ -904,7 +928,11 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Group Anagrams", "slug": "group-anagrams", "difficulty": "Medium" },
         { "title": "Longest Consecutive Sequence", "slug": "longest-consecutive-sequence", "difficulty": "Medium" },
-        { "title": "Word Break", "slug": "word-break", "difficulty": "Medium" }
+        { "title": "Word Break", "slug": "word-break", "difficulty": "Medium" },
+        { "title": "Valid Anagram", "slug": "valid-anagram", "difficulty": "Easy" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
+        { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" },
+        { "title": "Top K Frequent Elements", "slug": "top-k-frequent-elements", "difficulty": "Medium" }
       ]
     },
     {
@@ -913,7 +941,11 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Design Twitter", "slug": "design-twitter", "difficulty": "Medium" },
         { "title": "K Closest Points to Origin", "slug": "k-closest-points-to-origin", "difficulty": "Medium" },
-        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" }
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" },
+        { "title": "Top K Frequent Elements", "slug": "top-k-frequent-elements", "difficulty": "Medium" },
+        { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
+        { "title": "Subarray Sum Equals K", "slug": "subarray-sum-equals-k", "difficulty": "Medium" }
       ]
     },
     {
@@ -922,7 +954,10 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Find Median from Data Stream", "slug": "find-median-from-data-stream", "difficulty": "Hard" },
         { "title": "Minimum Cost to Connect Sticks", "slug": "minimum-cost-to-connect-sticks", "difficulty": "Medium" },
-        { "title": "Subarray Sum Equals K", "slug": "subarray-sum-equals-k", "difficulty": "Medium" }
+        { "title": "Subarray Sum Equals K", "slug": "subarray-sum-equals-k", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Top K Frequent Elements", "slug": "top-k-frequent-elements", "difficulty": "Medium" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" }
       ]
     },
     {
@@ -930,7 +965,12 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
         { "title": "Longest Substring Without Repeating Characters", "slug": "longest-substring-without-repeating-characters", "difficulty": "Medium" },
-        { "title": "Coin Change", "slug": "coin-change", "difficulty": "Medium" }
+        { "title": "Coin Change", "slug": "coin-change", "difficulty": "Medium" },
+        { "title": "Maximum Subarray", "slug": "maximum-subarray", "difficulty": "Medium" },
+        { "title": "3Sum", "slug": "3sum", "difficulty": "Medium" },
+        { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" },
+        { "title": "Reverse Linked List", "slug": "reverse-linked-list", "difficulty": "Easy" },
+        { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" }
       ]
     },
     {
@@ -939,7 +979,12 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "3Sum", "slug": "3sum", "difficulty": "Medium" },
         { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" },
-        { "title": "Word Ladder", "slug": "word-ladder", "difficulty": "Hard" }
+        { "title": "Word Ladder", "slug": "word-ladder", "difficulty": "Hard" },
+        { "title": "Subarray Sum Equals K", "slug": "subarray-sum-equals-k", "difficulty": "Medium" },
+        { "title": "Top K Frequent Elements", "slug": "top-k-frequent-elements", "difficulty": "Medium" },
+        { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" }
       ]
     },
     {
@@ -948,7 +993,10 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Design Parking System", "slug": "design-parking-system", "difficulty": "Easy" },
         { "title": "Top K Frequent Elements", "slug": "top-k-frequent-elements", "difficulty": "Medium" },
-        { "title": "Course Schedule II", "slug": "course-schedule-ii", "difficulty": "Medium" }
+        { "title": "Course Schedule II", "slug": "course-schedule-ii", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
+        { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" }
       ]
     },
     {
@@ -956,7 +1004,9 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Random Pick with Weight", "slug": "random-pick-with-weight", "difficulty": "Medium" },
         { "title": "Insert Delete GetRandom O(1)", "slug": "insert-delete-getrandom-o1", "difficulty": "Medium" },
-        { "title": "Alien Dictionary", "slug": "alien-dictionary", "difficulty": "Hard" }
+        { "title": "Alien Dictionary", "slug": "alien-dictionary", "difficulty": "Hard" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
+        { "title": "Max Points on a Line", "slug": "max-points-on-a-line", "difficulty": "Hard" }
       ]
     },
     {
@@ -964,7 +1014,10 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" },
         { "title": "K Closest Points to Origin", "slug": "k-closest-points-to-origin", "difficulty": "Medium" },
-        { "title": "Time Based Key-Value Store", "slug": "time-based-key-value-store", "difficulty": "Medium" }
+        { "title": "Time Based Key-Value Store", "slug": "time-based-key-value-store", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
+        { "title": "Two City Scheduling", "slug": "two-city-scheduling", "difficulty": "Medium" }
       ]
     },
     {
@@ -973,7 +1026,9 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Design Circular Queue", "slug": "design-circular-queue", "difficulty": "Medium" },
         { "title": "LFU Cache", "slug": "lfu-cache", "difficulty": "Hard" },
-        { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" }
+        { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" },
+        { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
+        { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" }
       ]
     },
     {
@@ -982,7 +1037,9 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Reverse Integer", "slug": "reverse-integer", "difficulty": "Medium" },
         { "title": "Counting Bits", "slug": "counting-bits", "difficulty": "Easy" },
-        { "title": "Maximum Subarray", "slug": "maximum-subarray", "difficulty": "Medium" }
+        { "title": "Maximum Subarray", "slug": "maximum-subarray", "difficulty": "Medium" },
+        { "title": "Single Number", "slug": "single-number", "difficulty": "Easy" },
+        { "title": "Reverse Bits", "slug": "reverse-bits", "difficulty": "Easy" }
       ]
     },
     {
@@ -1025,7 +1082,14 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Valid Anagram", "slug": "valid-anagram", "difficulty": "Easy" },
         { "title": "Reverse Linked List", "slug": "reverse-linked-list", "difficulty": "Easy" },
-        { "title": "Maximum Depth of Binary Tree", "slug": "maximum-depth-of-binary-tree", "difficulty": "Easy" }
+        { "title": "Maximum Depth of Binary Tree", "slug": "maximum-depth-of-binary-tree", "difficulty": "Easy" },
+        { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
+        { "title": "Climbing Stairs", "slug": "climbing-stairs", "difficulty": "Easy" },
+        { "title": "Valid Palindrome", "slug": "valid-palindrome", "difficulty": "Easy" },
+        { "title": "Reverse String", "slug": "reverse-string", "difficulty": "Easy" },
+        { "title": "Merge Two Sorted Lists", "slug": "merge-two-sorted-lists", "difficulty": "Easy" },
+        { "title": "Valid Parentheses", "slug": "valid-parentheses", "difficulty": "Easy" },
+        { "title": "Linked List Cycle", "slug": "linked-list-cycle", "difficulty": "Easy" }
       ]
     }
   ]
@@ -1033,9 +1097,9 @@ COMPANIES_DATA = {
 
 def get_company_slug(name):
     mapping = {
-        "Meta": "facebook",
+        "Meta": "meta",
         "Goldman Sachs": "goldman-sachs",
-        "Walmart Labs": "walmart",
+        "Walmart Labs": "walmart-labs",
         "TCS Digital": "tcs",
     }
     if name in mapping:
