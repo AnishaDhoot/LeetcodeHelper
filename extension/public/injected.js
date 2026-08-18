@@ -218,7 +218,7 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
 
       allElements.forEach(el => {
         // Do not hide active submission result panel or code editor
-        if (el.closest('[class*="submission-result"], [class*="result-"], [class*="monaco-editor"], #qd-content')) {
+        if (el.closest('[class*="submission-result"], [class*="result-"], [class*="monaco-editor"]')) {
           const classStr = (typeof el.className === "string" ? el.className : "").toLowerCase();
           if (classStr.includes("result") || classStr.includes("accepted") || classStr.includes("wrong") || classStr.includes("runtime")) {
             return;
