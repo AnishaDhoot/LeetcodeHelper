@@ -251,6 +251,90 @@ document.addEventListener("click", (e) => {
   }
 }, true);
 
+const cleanStarterCode = (codeText) => {
+  if (!codeText || typeof codeText !== "string") return "";
+  
+  const lines = codeText.split("\n");
+  const cleanedLines = [];
+  let insideCommentBlock = false;
+  let inMethodBody = false;
+  let methodBraceDepth = 0;
+  const isPython = lines.some(l => l.trim().startsWith("def "));
+
+  if (isPython) {
+    let inDef = false;
+    for (let line of lines) {
+      const trimmed = line.trim();
+      if (line.startsWith("#") || trimmed.startsWith("class ") || trimmed.startsWith("from ") || trimmed.startsWith("import ")) {
+        cleanedLines.push(line);
+        inDef = false;
+      } else if (trimmed.startsWith("def ")) {
+        cleanedLines.push(line);
+        cleanedLines.push("        pass");
+        inDef = true;
+      } else if (!inDef) {
+        cleanedLines.push(line);
+      }
+    }
+    return cleanedLines.join("\n");
+  }
+
+  // C-style languages (Java, C++, JS, TS, C#, Go, Rust, Swift)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Preserve comments
+    if (trimmed.startsWith("/*")) insideCommentBlock = true;
+    if (insideCommentBlock || trimmed.startsWith("//") || trimmed.startsWith("*")) {
+      cleanedLines.push(line);
+      if (trimmed.endsWith("*/")) insideCommentBlock = false;
+      continue;
+    }
+
+    // Preserve class / struct / header definitions
+    if (
+      trimmed.startsWith("class ") ||
+      trimmed.startsWith("struct ") ||
+      trimmed.startsWith("impl ") ||
+      trimmed.startsWith("public class ") ||
+      trimmed.startsWith("import ") ||
+      trimmed.startsWith("#include") ||
+      trimmed.startsWith("package ")
+    ) {
+      cleanedLines.push(line);
+      continue;
+    }
+
+    // Detect method signature line ending with { or starting method
+    if (!inMethodBody && (trimmed.endsWith("{") || (trimmed.includes("(") && trimmed.includes(")")))) {
+      cleanedLines.push(line);
+      if (line.includes("{")) {
+        inMethodBody = true;
+        methodBraceDepth = 1;
+        cleanedLines.push("        "); // Blank starter space inside method
+      }
+      continue;
+    }
+
+    if (inMethodBody) {
+      if (trimmed.includes("{")) methodBraceDepth++;
+      if (trimmed.includes("}")) methodBraceDepth--;
+
+      if (methodBraceDepth <= 0) {
+        inMethodBody = false;
+        cleanedLines.push(line); // Keep closing brace
+      }
+      // Skip inner previous solution lines
+      continue;
+    }
+
+    cleanedLines.push(line);
+  }
+
+  return cleanedLines.join("\n");
+};
+
 window.addEventListener("message", (event) => {
   // Only accept messages from ourselves
   if (event.source !== window) return;
@@ -303,14 +387,19 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
+      // Clear cached initial model values so previous solution isn't re-applied
+      window.__dsaTutorInitialModelValues = new Map();
+
       // Unlock Monaco editor models temporarily to allow setting starter code
       const editors = window.monaco?.editor?.getEditors() || [];
       editors.forEach(ed => ed.updateOptions({ readOnly: false }));
 
       // 1. Try to click LeetCode's native Reset Code button in DOM
-      const resetCandidates = Array.from(document.querySelectorAll('button, div[role="button"], span[role="button"], [data-keyup="reset-code"]'));
+      const resetCandidates = Array.from(document.querySelectorAll(
+        'button, div[role="button"], span[role="button"], [data-keyup="reset-code"], [data-track-name="reset_code"], [aria-label*="Reset"], [title*="Reset"], [data-cypress="ResetCode"]'
+      ));
       const resetBtn = resetCandidates.find(el => {
-        const title = (el.getAttribute('title') || el.getAttribute('aria-label') || el.getAttribute('data-cy') || el.textContent || '').toLowerCase();
+        const title = (el.getAttribute('title') || el.getAttribute('aria-label') || el.getAttribute('data-cy') || el.getAttribute('data-track-name') || el.textContent || '').toLowerCase();
         return title.includes('reset') || title.includes('restore') || title.includes('revert');
       });
 
@@ -326,16 +415,17 @@ window.addEventListener("message", (event) => {
         }, 150);
       }
 
-      // 2. Restore recorded initial starter code for Monaco models if available
+      // 2. Clean previous solution code from Monaco models, leaving pristine stubs
       const models = window.monaco?.editor?.getModels();
       if (models && models.length > 0) {
         models.forEach(model => {
           const uriStr = model.uri ? model.uri.toString() : "";
           if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-            if (window.__dsaTutorInitialModelValues.has(uriStr)) {
-              const initVal = window.__dsaTutorInitialModelValues.get(uriStr);
-              if (initVal) {
-                model.setValue(initVal);
+            const currentVal = model.getValue() || "";
+            if (currentVal) {
+              const cleaned = cleanStarterCode(currentVal);
+              if (cleaned && cleaned.trim().length > 0) {
+                model.setValue(cleaned);
               }
             }
           }

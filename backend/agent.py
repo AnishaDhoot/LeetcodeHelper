@@ -505,7 +505,12 @@ def evaluate_mock_approach(problem_title: str, approach_text: str) -> dict:
 def generate_mock_scorecard(company: str, duration_seconds: int, questions_data: list) -> dict:
     """Generates an interview scorecard based on user performance across 3 mock questions."""
     system_prompt = (
-        "You are a Lead Software Engineering Interviewer evaluating a candidate's full 3-question technical interview. "
+        "You are a Lead Software Engineering Interviewer evaluating a candidate's 3-question technical interview.\n"
+        "Review the candidate's strategy, time taken, and coding submission status for EACH question.\n\n"
+        "EVALUATION RULES:\n"
+        "- Base your evaluation STRICTLY on the candidate's attempts and performance during THIS interview session.\n"
+        "- If the candidate submitted valid algorithm strategies and solved the questions in 1-2 attempts during the session, assign a verdict of 'Strong Hire' or 'Hire'.\n"
+        "- Only assign 'Weak Lean' or 'Needs Practice' if the candidate failed to submit working code or gave incorrect/nonsense strategies during the session.\n\n"
         "Return ONLY a JSON object with keys:\n"
         "{\n"
         '  "verdict": "Strong Hire" | "Hire" | "Weak Lean" | "Needs Practice",\n'
@@ -517,7 +522,7 @@ def generate_mock_scorecard(company: str, duration_seconds: int, questions_data:
         '  "areas_for_improvement": ["list of 2-3 improvement areas"]\n'
         "}"
     )
-    prompt = f"Company: {company or 'General Tech'}\nTime Spent: {duration_seconds // 60} minutes\nQuestions & Approaches: {json.dumps(questions_data)}"
+    prompt = f"Company: {company or 'General Tech'}\nTime Spent: {duration_seconds // 60} minutes\nQuestions, Approaches & Session Submissions: {json.dumps(questions_data)}"
     
     fallback = {
         "verdict": "Hire",

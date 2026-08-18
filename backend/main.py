@@ -1421,13 +1421,28 @@ def evaluate_mock_session(req: MockEvaluateRequest, db: Session = Depends(get_db
     prob_ids = [p.strip() for p in (session.problem_ids or "").split(",") if p.strip()]
     appr_texts = json.loads(session.approaches_text) if session.approaches_text else ["", "", ""]
     
+    session_start = session.start_time
+
     questions_data = []
     for idx, pid in enumerate(prob_ids):
         p = db.query(Problem).filter(Problem.id == pid).first()
+        
+        # Query ONLY attempts submitted DURING or AFTER this mock interview session start
+        session_attempts = db.query(Attempt).filter(
+            Attempt.problem_id == pid,
+            Attempt.timestamp >= session_start
+        ).order_by(Attempt.timestamp.asc()).all()
+
+        attempts_count = len(session_attempts)
+        is_solved = any(a.verdict == "Accepted" for a in session_attempts)
+        latest_verdict = session_attempts[-1].verdict if session_attempts else "Not Submitted"
+
         questions_data.append({
             "title": p.title if p else pid,
             "difficulty": p.difficulty if p else "Medium",
-            "approach": appr_texts[idx] if idx < len(appr_texts) else ""
+            "approach": appr_texts[idx] if idx < len(appr_texts) else "",
+            "attempts_in_session": attempts_count,
+            "session_status": "Solved (Accepted)" if is_solved else (f"Attempted ({latest_verdict})" if attempts_count > 0 else "Not Submitted")
         })
         
     duration = session.time_taken_seconds or int((get_utc_now() - session.start_time).total_seconds())
@@ -1588,12 +1603,19 @@ def get_mock_interview_report(db: Session = Depends(get_db)):
                 except Exception:
                     pass
             q_data = []
+            session_start = s.start_time
             for idx, pid in enumerate(prob_ids_raw):
                 p = db.query(Problem).filter(Problem.id == pid).first()
+                s_attempts = db.query(Attempt).filter(
+                    Attempt.problem_id == pid,
+                    Attempt.timestamp >= session_start
+                ).order_by(Attempt.timestamp.asc()).all()
                 q_data.append({
                     "title": p.title if p else pid,
                     "difficulty": p.difficulty if p else "Medium",
-                    "approach": appr_texts_raw[idx] if idx < len(appr_texts_raw) else ""
+                    "approach": appr_texts_raw[idx] if idx < len(appr_texts_raw) else "",
+                    "attempts_in_session": len(s_attempts),
+                    "session_status": "Solved (Accepted)" if any(a.verdict == "Accepted" for a in s_attempts) else ("Attempted" if s_attempts else "Not Submitted")
                 })
             duration = s.time_taken_seconds or int((get_utc_now() - s.start_time).total_seconds())
             try:
@@ -1666,6 +1688,8 @@ def get_mock_interview_report(db: Session = Depends(get_db)):
                 pass
 
         md.append("### 🧩 Questions, Strategy & Execution Details")
+        session_start = s.start_time
+
         for idx, pid in enumerate(problem_ids):
             prob = db.query(Problem).filter(Problem.id == pid).first()
             title = prob.title if prob else pid
@@ -1690,11 +1714,14 @@ def get_mock_interview_report(db: Session = Depends(get_db)):
                 md.append(f"- **AI Interviewer Feedback**:")
                 md.append(f"  > 🤖 {fb_val}")
 
-            # Submission & Attempt Details
-            attempts = db.query(Attempt).filter(Attempt.problem_id == pid).order_by(Attempt.timestamp.asc()).all()
+            # Submission & Attempt Details - FILTERED BY SESSION START TIME
+            attempts = db.query(Attempt).filter(
+                Attempt.problem_id == pid,
+                Attempt.timestamp >= session_start
+            ).order_by(Attempt.timestamp.asc()).all()
             total_attempts = len(attempts)
             
-            md.append(f"- **Coding Submission Attempts**: `{total_attempts} attempt(s)`")
+            md.append(f"- **Coding Submission Attempts (in Session)**: `{total_attempts} attempt(s)`")
             
             if attempts:
                 accepted_attempts = [a for a in attempts if a.verdict == "Accepted"]
@@ -1706,7 +1733,7 @@ def get_mock_interview_report(db: Session = Depends(get_db)):
                 else:
                     md.append(f"- **Test Cases Status**: ❌ `Failed Test Cases` (Latest Verdict: `{latest_verdict}`)")
 
-                md.append("  - **Attempt Log & Diagnostics**:")
+                md.append("  - **Session Attempt Log & Diagnostics**:")
                 for att_idx, att in enumerate(attempts):
                     verdict_icon = "✅" if att.verdict == "Accepted" else "❌"
                     time_str = f" in {att.time_taken_seconds}s" if att.time_taken_seconds else ""
