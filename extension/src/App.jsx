@@ -750,6 +750,32 @@ export default function App() {
     return () => clearInterval(t);
   }, [activeTest]);
 
+  // Lock Solutions, Editorial, and Discussion tabs during Mock Interviews & Badge Tests
+  useEffect(() => {
+    const isAssessmentActive = !!(activeTest || (isMockMode && mockSession));
+    const reason = isMockMode ? 'Mock Interview' : activeTest ? 'Badge Test' : 'Assessment';
+
+    const notifyLock = () => {
+      if (window.dsaTutor?.setAssessmentLocked) {
+        window.dsaTutor.setAssessmentLocked(isAssessmentActive, reason);
+      } else {
+        window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked: isAssessmentActive, reason }, '*');
+      }
+    };
+
+    notifyLock();
+    const lockPulse = setInterval(notifyLock, 1000);
+
+    return () => {
+      clearInterval(lockPulse);
+      if (window.dsaTutor?.setAssessmentLocked) {
+        window.dsaTutor.setAssessmentLocked(false, '');
+      } else {
+        window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked: false, reason: '' }, '*');
+      }
+    };
+  }, [activeTest, isMockMode, mockSession]);
+
   // Fetch data on mount
   useEffect(() => {
     fetchMastery();

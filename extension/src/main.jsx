@@ -310,6 +310,9 @@ window.dsaTutor.getIdentity = scrapeProblemIdentity;
 window.dsaTutor.setEditorReadOnly = (readOnly) => {
   window.postMessage({ type: 'SET_READ_ONLY', readOnly }, '*');
 };
+window.dsaTutor.setAssessmentLocked = (locked, reason) => {
+  window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked, reason }, '*');
+};
 window.dsaTutor.resetEditor = () => {
   window.postMessage({ type: 'RESET_EDITOR' }, '*');
 };
