@@ -1,7 +1,7 @@
-# 🧠 DSA Tutor Agent — Complete Project Master Guide
+# 🧠 CodeCoach Agent — Complete Project Master Guide
 
 > **Author**: Anisha Dhoot  
-> **Project**: Autonomous DSA Tutor Agent — LeetCode Companion  
+> **Project**: Autonomous CodeCoach Agent — LeetCode Companion  
 > **Target Audience**: Technical Interviewers, Systems Engineers, AI/ML Engineers  
 
 ---
@@ -25,7 +25,7 @@ When practicing Data Structures & Algorithms (DSA) on platforms like LeetCode, s
 2. **Lack of Personalization**: Standard practice lists (e.g. Blind 75) treat all users identically, ignoring individual topic weaknesses, forgetting curves, and skill gaps.
 
 ### The Solution: Agentic AI Overlay
-**DSA Tutor Agent** is an autonomous AI companion embedded directly into the browser context. It observes user behavior in real time, intercepts code submission failures automatically, categorizes failure root-causes, updates a dynamic Elo topic mastery model, and delivers adaptive problem recommendations and progressive 3-stage hints.
+**CodeCoach Agent** is an autonomous AI companion embedded directly into the browser context. It observes user behavior in real time, intercepts code submission failures automatically, categorizes failure root-causes, updates a dynamic Elo topic mastery model, and delivers adaptive problem recommendations, timed 3-question mock interviews, formal Badge Tests, and progressive 3-stage hints.
 
 ---
 
@@ -47,7 +47,8 @@ When practicing Data Structures & Algorithms (DSA) on platforms like LeetCode, s
 │                 ▼                                                  │                    │
 │  ┌───────────────────────────────┐                                 │                    │
 │  │   Page Scraper (injected.js)  │                                 │                    │
-│  │   - Reads Monaco Memory       │                                 │                    │
+│  │   - Monaco Memory Reader      │                                 │                    │
+│  │   - DOM Lock / Fairplay CSS   │                                 │                    │
 │  └──────────────┬────────────────┘                                 │                    │
 │                 │                                                  │                    │
 │                 │ chrome.runtime.sendMessage                       │                    │
@@ -80,7 +81,7 @@ When practicing Data Structures & Algorithms (DSA) on platforms like LeetCode, s
 │                                                                     │                  │
 │                                      ┌──────────────────────────────┴───────────────┐  │
 │                                      │          Dual LLM Inference Provider         │  │
-│                                      │  Primary: Groq Cloud API (Llama 3.1 8B)      │  │
+│                                      │  Primary: Groq API (openai/gpt-oss-20b)      │  │
 │                                      │  Fallback: Local Ollama (qwen2.5:7b)         │  │
 │                                      └──────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
@@ -116,41 +117,35 @@ To prevent giving away answers, hints are gated progressively:
 
 ---
 
-## 4. Mathematical Engine: Elo Scoring & Spaced Repetition
+## 4. Mathematical Engine: Test-Driven Topic Mastery & Spaced Repetition
 
-### 4.1 Elo Skill Scoring Formula
-Every DSA topic (e.g. *Arrays & Hashing*, *Dynamic Programming*, *Trees*) maintains an independent Elo rating $R \in [400, 3000]$, seeded at $R_0 = 1200$.
+### 4.1 Test-Driven Badge Test Progression
+Topic mastery levels ($0-5$) and badges are unlocked **strictly via formal, timed Badge Tests**. Standard problem submissions update attempt counts, success rates, and spaced-repetition schedules, but badge level advancement is strictly test-gated.
 
-When a submission occurs:
-1. **Implied Problem Rating ($S_{\text{opp}}$)**:
-   $$\text{Easy} = 800, \quad \text{Medium} = 1200, \quad \text{Hard} = 1600$$
-
-2. **Expected Win Probability ($E$)**:
-   $$E = \frac{1}{1 + 10^{(S_{\text{opp}} - R_{\text{user}}) / 400}}$$
-
-3. **Dynamic K-Factor**:
-   $$K = \begin{cases} 32 & \text{if attempts} \le 10 \quad \text{(Fast initial calibration)} \\ 24 & \text{if } 10 < \text{attempts} \le 30 \\ 16 & \text{if attempts} > 30 \quad \text{(Stable rating)} \end{cases}$$
-
-4. **Rating Update**:
-   $$R_{\text{new}} = \max\left(400, \min\left(3000, R_{\text{old}} + K \times (S_{\text{actual}} - E)\right)\right)$$
-   *(where $S_{\text{actual}} = 1.0$ for `Accepted`, $0.0$ for failure)*.
-
-5. **Normalized Mastery Score ($M \in [0.0, 1.0]$)**:
-   $$M = \max\left(0.0, \min\left(1.0, \frac{R_{\text{user}} - 800}{1200}\right)\right)$$
+| Level | Badge Name | Badge Icon | Unlocked Difficulty Band | Evaluation Test Criteria |
+| :---: | :--- | :---: | :--- | :--- |
+| **0** | Locked / None | ❌ | Easy | Initial level for all topics. |
+| **1** | Bronze | 🥉 | Easy | Complete 2 Easy problems in 1.5 hours. |
+| **2** | Silver | 🥈 | Medium | Complete 2 Easy/Medium problems in 1.5 hours. |
+| **3** | Gold | 🥇 | Medium | Complete 2 Medium problems in 1.5 hours. |
+| **4** | Platinum | 🛡️ | Hard | Complete 2 Medium/Hard problems in 1.5 hours. |
+| **5** | Diamond | 💎 | Hard | Complete 2 Hard problems in 1.5 hours. |
 
 ### 4.2 Productive Struggle & Exploration Policy
-- **Productive Struggle Band**: The recommender selects target problem difficulties matching the user's current Elo:
-  - $M < 0.40$ (Elo $< 1280$) $\rightarrow$ Target **Easy**
-  - $0.40 \le M < 0.65$ (Elo $1280 - 1580$) $\rightarrow$ Target **Medium**
-  - $M \ge 0.65$ (Elo $\ge 1580$) $\rightarrow$ Target **Hard**
+- **Productive Struggle Band**: The recommender selects target problem difficulties matching the user's unlocked badge level:
+  - Level 0 / Level 1 (Bronze) $\rightarrow$ Target **Easy**
+  - Level 2 (Silver) / Level 3 (Gold) $\rightarrow$ Target **Medium**
+  - Level 4 (Platinum) / Level 5 (Diamond) $\rightarrow$ Target **Hard**
+- **Dynamic Streak Adjustments**: Solving 2 consecutive problems upgrades target difficulty; failing 2 consecutive problems steps down difficulty to rebuild confidence.
 - **Epsilon-Greedy Exploration ($\epsilon=0.15$)**: With 15% probability, the top recommendation is swapped for a random problem outside the productive struggle band to expose the user to unfamiliar topics.
 
 ### 4.3 Spaced Repetition Scheduling
-Upon solving a problem (`Accepted`), a 4-stage retention review schedule is initialized or advanced:
+Upon solving a problem (`Accepted`), a 5-stage retention review schedule is initialized or advanced:
 - **Stage 1**: Review due in **3 days**
 - **Stage 2**: Review due in **7 days**
 - **Stage 3**: Review due in **14 days**
-- **Stage 4**: Mastered (due in 3650 days)
+- **Stage 4**: Review due in **30 days**
+- **Stage 5**: Mastered (due in 3,650 days)
 
 ---
 
@@ -159,42 +154,47 @@ Upon solving a problem (`Accepted`), a 4-stage retention review schedule is init
 ### 5.1 Backend Files
 
 #### `backend/agent.py` — The AI Agent Engine
-- `query_groq()`: Sends system and user prompts to Groq API (`llama-3.1-8b-instant`) with `max_tokens=1024` and `response_format={"type": "json_object"}`.
+- `query_groq()`: Sends prompts to Groq API (`openai/gpt-oss-20b` / candidate models) with `max_tokens=1024` and `response_format={"type": "json_object"}`.
 - `query_ollama()`: Fallback provider querying local Ollama (`qwen2.5:7b`) via official python SDK.
 - `clean_json_string()`: Strips markdown code block wrappers (````json ... ````) and performs non-greedy extraction.
 - `repair_json_string()`: Fixes unescaped quotes and trailing commas before parsing.
-- Prompt Builders: `generate_diagnosis()`, `generate_approach_critique()`, `generate_levelled_hint()`, `analyze_edge_cases()`, `answer_custom_question()`, `generate_explain_back_check()`.
+- Prompt Builders: `generate_diagnosis()`, `generate_approach_critique()`, `generate_levelled_hint()`, `analyze_edge_cases()`, `answer_custom_question()`, `generate_explain_back_check()`, `evaluate_mock_approach()`, `generate_mock_scorecard()`.
 
 #### `backend/main.py` — FastAPI Server & REST Endpoints
-- `analyze_submission()`: Primary endpoint receiving code, verdict, and test cases. Splits comma-separated topic strings and updates Elo ratings per topic independently.
-- `sync_solved()`: Batch sync endpoint for LeetCode historical solves; seeds Elo ratings using log-scaling formula without overwriting live progress.
+- `analyze_submission()`: Primary endpoint receiving code, verdict, and test cases. Splits comma-separated topic strings and updates attempt/success metrics per topic independently.
+- `sync_solved()`: Batch sync endpoint for LeetCode historical solves; imports solved problems in a single call via `/api/problems/all/` and bulk GraphQL queries without rate-limiting.
+- Daily AI Quota (`/check-ai-quota`): Enforces process-safe daily limits (default: 25 requests/day) using atomic SQL updates.
 - Schema Migration (`_ensure_schema()`): Auto-migrates database schemas across versions without data loss.
 
 #### `backend/database.py` — Database Initialization
 - `DB_PATH`: Resolves absolute path to `dsa_tutor.db` in project root.
 - `create_engine`: Initializes SQLite connection with `connect_args={"check_same_thread": False, "timeout": 15}` to prevent write lock errors under concurrent loads.
 
-#### `backend/models.py` — SQLAlchemy ORM Models
-- `Problem`: Primary key `id` (slug), title, difficulty, comma-separated `topics`, `companies`, `user_notes`, `personal_difficulty`.
+#### `backend/models.py` — SQLAlchemy ORM & Pydantic Models
+- `Problem`: Primary key `id` (slug), title, difficulty, comma-separated `topics`, `companies`, `user_notes`, `personal_difficulty`, `is_solved`, `is_premium`.
 - `Attempt`: Records submission verdict, failure category, explanation text, time spent, and `hints_used`.
-- `TopicMastery`: Tracks per-topic Elo `rating`, `attempts_count`, `success_count`, `last_updated`, `next_review_date`.
+- `TopicMastery`: Tracks per-topic `level` ($0-5$), `attempts_count`, `success_count`, `last_updated`, `next_review_date`.
+- `BadgeTest`: Stores active 1.5h evaluation test sessions (topic, level, problem1_id, problem2_id, status).
+- `MockInterviewSession`: Manages 3-question mock sessions (company, problem_ids, current_question_index, approaches_submitted, ai_feedback, scorecard).
+
 
 ---
 
 ### 5.2 Extension Files
 
-#### `extension/public/injected.js` — Monaco Editor Memory Reader
+#### `extension/public/injected.js` — Monaco Editor & DOM Controls
 - Runs in main page JS context (`world: "MAIN"`).
-- Iterates `window.monaco.editor.getModels()` and selects the non-testcase model with the largest code payload.
-- Includes DOM container fallback scraper (`.view-line`, `textarea`, `.CodeMirror`).
+- Iterates `window.monaco.editor.getModels()` and selects non-testcase code models.
+- Applies `readOnly` state and injects DOM lock overlays during approach-gated mock sessions.
+- Injects Fairplay CSS hiding solutions, editorials, and discussion tabs during active tests/mocks.
 
 #### `extension/public/background.js` — Service Worker Event Router
 - Handles API passthrough calls between extension overlay and backend API.
 - Implements `fetchSolvedProblemsViaTab()` using `chrome.scripting.executeScript` to pull historical solves from LeetCode. Batches GraphQL requests in groups of 5 with 80ms delays to prevent HTTP 429 rate limiting.
-- Manages 15-minute background alarm for due review badge alerts.
+- Manages 15-minute background alarm for due review alerts.
 
 #### `extension/src/main.jsx` — Content Script & DOM Observer
-- Mounts React application into a isolated Shadow Root container (`dsa-tutor-panel-root`).
+- Mounts React application into an isolated Shadow Root container (`dsa-tutor-panel-root`).
 - Implements `MutationObserver` on `document.body` to auto-detect submission verdict badges.
 - Exposes window helpers (`dsaTutor.getCode()`, `dsaTutor.getLanguage()`, `dsaTutor.getConstraints()`).
 
@@ -206,7 +206,7 @@ Upon solving a problem (`Accepted`), a 4-stage retention review schedule is init
 
 ## 6. Production Hardening & Bug Fix Case Studies
 
-During development, five critical production-level bugs were identified, diagnosed, and resolved:
+During development, critical production-level bugs were identified, diagnosed, and resolved:
 
 ### Case Study 1: LLM Output Truncation & Fallback Loop
 * **Symptom**: Complex Level 3 hints and edge-case lists consistently returned generic fallback text (*"The tutor could not parse a structured explanation..."*).
@@ -258,12 +258,12 @@ During development, five critical production-level bugs were identified, diagnos
 ## 7. Interview Preparation Guide & Technical Q&A
 
 ### 30-Second Interview Pitch
-> *"I built **DSA Tutor Agent**, an autonomous browser extension and AI backend for LeetCode. It observes user submissions in real time, diagnoses failure root-causes using structured LLM classification, dynamically adapts problem recommendations via per-topic Elo ratings, and provides 3-stage progressive hints and mock interview practice."*
+> *"I built **CodeCoach Agent**, an autonomous browser extension and AI backend for LeetCode. It observes user submissions in real time, diagnoses failure root-causes using structured LLM classification, dynamically adapts problem recommendations via per-topic Elo ratings, and provides 3-stage progressive hints, Badge Tests, and 3-question mock interviews."*
 
 ### Key Technical Talking Points
 1. **Agentic Architecture**: Event-driven perception loop (DOM observer + Monaco extraction + LLM taxonomy + dynamic state mutation).
 2. **Mathematical Rigor**: Elo rating update equations for skill scoring & Productive Struggle Band tuning.
-3. **Resilience & Production Hardening**: Dual-LLM fallback (Groq Cloud $\rightarrow$ Ollama Local), JSON repair pipeline, SQLite lock handling, and GraphQL rate limiting.
+3. **Resilience & Production Hardening**: Dual-LLM fallback (Groq Cloud $\rightarrow$ Ollama Local), JSON repair pipeline, SQLite lock handling, atomic AI quota enforcement, and GraphQL rate limiting.
 
 ### 5 Tough Interview Questions & Sample Answers
 
@@ -286,3 +286,4 @@ During development, five critical production-level bugs were identified, diagnos
 
 ## 📄 License
 MIT License © 2026 Anisha Dhoot
+
