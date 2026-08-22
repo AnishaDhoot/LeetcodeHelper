@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "25"))
+AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "50"))
 
 def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -753,6 +753,11 @@ def check_approach(req: CheckApproachRequest, db: Session = Depends(get_db)):
         constraints=req.constraints
     )
     return CheckApproachResponse(
+        is_optimal=result.get("is_optimal", False),
+        current_complexity=result.get("current_complexity", "O(N)"),
+        optimal_complexity=result.get("optimal_complexity", "O(N)"),
+        feedback=result.get("feedback") or result.get("explanation", ""),
+        alternative_approach=result.get("alternative_approach") or result.get("suggested_action", ""),
         verdict=result.get("verdict", "Critique complete"),
         explanation=result.get("explanation") or result.get("feedback", ""),
         suggested_action=result.get("suggested_action") or result.get("alternative_approach", "")

@@ -41,14 +41,14 @@ def query_ollama(prompt: str, system_prompt: str) -> str:
         raise e
 
 def query_groq(prompt: str, system_prompt: str) -> str:
-    """Queries Groq API as a cloud fallback."""
+    """Queries Groq API as a cloud fallback, handling JSON schema enforcement and model failovers."""
     api_key = get_groq_api_key()
     if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is not set")
     
     client = Groq(api_key=api_key)
     target_model = get_groq_model()
-    candidate_models = [target_model, "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"]
+    candidate_models = [target_model, "openai/gpt-oss-20b", "openai/gpt-oss-120b", "groq/compound-mini", "groq/compound", "qwen/qwen3.6-27b"]
     
     # Remove duplicates while preserving order
     seen = set()
@@ -56,6 +56,7 @@ def query_groq(prompt: str, system_prompt: str) -> str:
 
     last_exception = None
     for model in models_to_try:
+        # Step 1: Try with strict json_object response format
         try:
             chat_completion = client.chat.completions.create(
                 messages=[
@@ -70,29 +71,90 @@ def query_groq(prompt: str, system_prompt: str) -> str:
             return chat_completion.choices[0].message.content
         except Exception as e:
             err_msg = str(e)
-            print(f"Error querying Groq with model '{model}': {e}")
+            print(f"Attempt with model '{model}' (json_object mode) failed: {e}")
             last_exception = e
-            # Only retry next model if it's a model not found / 404 error
-            if "model_not_found" in err_msg or "404" in err_msg or "does not exist" in err_msg:
-                continue
-            else:
-                raise e
+
+            # Step 2: If JSON validation failed on Groq side, retry without response_format constraint
+            if "json_validate_failed" in err_msg or "400" in err_msg:
+                try:
+                    print(f"Retrying '{model}' without json_object constraint...")
+                    chat_completion = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt}
+                        ],
+                        model=model,
+                        temperature=0.2,
+                        max_tokens=1024
+                    )
+                    return chat_completion.choices[0].message.content
+                except Exception as retry_e:
+                    print(f"Retry without json_object on '{model}' also failed: {retry_e}")
+                    last_exception = retry_e
+
+            # Continue trying next candidate model in list
+            continue
 
     if last_exception:
         raise last_exception
 
+
 def clean_json_string(response_text: str) -> str:
-    """Cleans code blocks or other wrapper text around JSON from the response."""
+    """Cleans code blocks, thinking tags, or other wrapper text around JSON from the response."""
     text = response_text.strip()
+    # Remove thinking tags from reasoning models (e.g. Qwen / DeepSeek)
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
     # Remove markdown code block syntax if present
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
-    # Find JSON structure in the text
+    # Find JSON object in the text
     match = re.search(r"\{[\s\S]*\}", text)
     if match:
         return match.group(0)
     return text
+
+
+def repair_json_string(s: str) -> str:
+    """Attempts lightweight repair on invalid JSON strings produced by LLMs."""
+    # Fix trailing commas before closing braces/brackets
+    s = re.sub(r",\s*([\]}])", r"\1", s)
+    return s
+
+
+def query_llm(prompt: str, system_prompt: str) -> str:
+    """Queries Groq if key is set, falling back to local Ollama if Groq fails or is unconfigured."""
+    api_key = get_groq_api_key()
+    if api_key:
+        try:
+            print(f"Querying Groq using model {get_groq_model()}...")
+            return query_groq(prompt, system_prompt)
+        except Exception as e:
+            print(f"Groq query failed ({e}). Falling back to Ollama ({get_ollama_model()})...")
+            return query_ollama(prompt, system_prompt)
+    else:
+        print(f"No GROQ_API_KEY found. Querying Ollama using model {get_ollama_model()}...")
+        return query_ollama(prompt, system_prompt)
+
+
+def query_llm_json(prompt: str, system_prompt: str, default_fallback: dict) -> dict:
+    """Queries LLM and ensures response is parsed as a valid JSON dictionary."""
+    for attempt in range(2):
+        try:
+            response_text = query_llm(prompt, system_prompt)
+            cleaned = clean_json_string(response_text)
+            try:
+                parsed = json.loads(cleaned)
+            except Exception:
+                repaired = repair_json_string(cleaned)
+                parsed = json.loads(repaired)
+
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception as e:
+            print(f"LLM JSON query attempt {attempt + 1} failed: {e}")
+    return default_fallback
+
 
 def generate_diagnosis(
     problem_title: str,
@@ -104,7 +166,7 @@ def generate_diagnosis(
 ) -> dict:
     """
     Sends problem details, submitted code, and failure details to the LLM agent.
-    Returns a dictionary containing {category, explanation, suggested_action}.
+    Returns a dictionary containing {root_cause_category, explanation, suggested_action}.
     """
     system_prompt = (
         "You are an expert Data Structures and Algorithms (DSA) Tutor. "
@@ -121,11 +183,11 @@ def generate_diagnosis(
         "Provide a suggested next action (e.g., 'Try dry running on [3, 1, 2] to see where the pointers diverge', "
         "'Step down to an Easy problem on Sliding Window', or 'Recall how to handle duplicates in sorted arrays').\n\n"
         "You MUST respond in strict JSON format with exactly three keys:\n"
-        '{\n'
-        '  "category": "wrong_approach" | "implementation_bug" | "edge_case_miss" | "complexity_issue" | "unclear",\n'
+        "{\n"
+        '  "category": "wrong_approach",\n'
         '  "explanation": "Your detailed explanation here.",\n'
         '  "suggested_action": "Your recommended action here."\n'
-        '}'
+        "}"
     )
 
     # Format test case info
@@ -149,79 +211,26 @@ def generate_diagnosis(
         f"Error/Stderr details: {error_details or 'None'}\n"
         f"Failing Test Case Info:\n{test_cases_str}\n\n"
         f"Submitted Code:\n```\n{code}\n```\n\n"
-        "Please diagnose the root cause of this failure and respond in the requested JSON format."
+        "Please diagnose the root cause of this failure and respond with a valid JSON object only."
     )
 
-    response_text = ""
-    for attempt in range(2): # Simple retry logic
-        try:
-            response_text = query_llm(user_prompt, system_prompt)
-            cleaned_response = clean_json_string(response_text)
-            parsed = json.loads(cleaned_response)
-            
-            # Basic key validation
-            if all(key in parsed for key in ["category", "explanation", "suggested_action"]):
-                # Map categories safely
-                valid_categories = ["wrong_approach", "implementation_bug", "edge_case_miss", "complexity_issue", "unclear"]
-                if parsed["category"] not in valid_categories:
-                    parsed["category"] = "unclear"
-                return {
-                    "root_cause_category": parsed["category"],
-                    "explanation": parsed["explanation"],
-                    "suggested_action": parsed["suggested_action"]
-                }
-        except Exception as e:
-            print(f"Attempt {attempt + 1} failed: {e}. Raw response: {response_text}")
-            if attempt == 1:
-                break
-                
-    # Final fallback if LLM queries fail or return invalid JSON
-    return {
-        "root_cause_category": "unclear",
-        "explanation": "The tutor could not parse a structured explanation from the local agent. Please check your submission or try again.",
-        "suggested_action": "Check code syntax and try resubmitting, or ensure Ollama is running."
+    fallback = {
+        "category": "unclear",
+        "explanation": "The tutor could not parse a structured explanation from the agent. Please check your submission or try again.",
+        "suggested_action": "Check code syntax and try resubmitting."
     }
 
+    parsed = query_llm_json(user_prompt, system_prompt, fallback)
+    valid_categories = ["wrong_approach", "implementation_bug", "edge_case_miss", "complexity_issue", "unclear"]
+    cat = parsed.get("category", "unclear")
+    if cat not in valid_categories:
+        cat = "unclear"
 
-def query_llm(prompt: str, system_prompt: str) -> str:
-    """Queries Groq if key is set, falling back to local Ollama if Groq fails or is unconfigured."""
-    api_key = get_groq_api_key()
-    if api_key:
-        try:
-            print(f"Querying Groq using model {get_groq_model()}...")
-            return query_groq(prompt, system_prompt)
-        except Exception as e:
-            print(f"Groq query failed ({e}). Falling back to Ollama ({get_ollama_model()})...")
-            return query_ollama(prompt, system_prompt)
-    else:
-        print(f"No GROQ_API_KEY found. Querying Ollama using model {get_ollama_model()}...")
-        return query_ollama(prompt, system_prompt)
-
-
-def repair_json_string(s: str) -> str:
-    """Attempts lightweight repair on invalid JSON strings produced by LLMs."""
-    # Fix trailing commas before closing braces/brackets
-    s = re.sub(r",\s*([\]}])", r"\1", s)
-    return s
-
-
-def query_llm_json(prompt: str, system_prompt: str, default_fallback: dict) -> dict:
-    """Queries LLM and ensures response is parsed as a valid JSON dictionary."""
-    for attempt in range(2):
-        try:
-            response_text = query_llm(prompt, system_prompt)
-            cleaned = clean_json_string(response_text)
-            try:
-                parsed = json.loads(cleaned)
-            except Exception:
-                repaired = repair_json_string(cleaned)
-                parsed = json.loads(repaired)
-
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception as e:
-            print(f"LLM JSON query attempt {attempt + 1} failed: {e}")
-    return default_fallback
+    return {
+        "root_cause_category": cat,
+        "explanation": parsed.get("explanation", fallback["explanation"]),
+        "suggested_action": parsed.get("suggested_action", fallback["suggested_action"])
+    }
 
 
 def generate_approach_critique(
@@ -236,10 +245,10 @@ def generate_approach_critique(
         "Check if the approach is optimal or can be optimized (e.g. O(N^2) time to O(N) or O(N log N)).\n"
         "You MUST respond in strict JSON format with exactly five keys:\n"
         "{\n"
-        '  "is_optimal": true | false,\n'
+        '  "is_optimal": true,\n'
         '  "current_complexity": "e.g., O(N^2) time, O(1) space",\n'
         '  "optimal_complexity": "e.g., O(N) time, O(N) space",\n'
-        '  "feedback": "Critique their approach in 2-3 sentences. Tell them if it\'s good or if there is a better way.",\n'
+        '  "feedback": "Critique their approach in 2-3 sentences. Tell them if it is good or if there is a better way.",\n'
         '  "alternative_approach": "Briefly describe the optimal approach steps."\n'
         "}"
     )
@@ -250,7 +259,7 @@ def generate_approach_critique(
         f"Language: {language}\n"
         f"Constraints:\n{constraints_str}\n\n"
         f"User's Code:\n```\n{code}\n```\n\n"
-        "Please analyze this code and return the requested JSON."
+        "Please analyze this code and return a valid JSON object only."
     )
 
     fallback = {
@@ -286,7 +295,7 @@ def generate_hint(
         f"Language: {language}\n"
         f"Constraints:\n{constraints_str}\n\n"
         f"User's Current Code:\n```\n{code}\n```\n\n"
-        "Please give me a clear, actionable hint to guide me forward."
+        "Please give me a clear, actionable hint and respond with a valid JSON object only."
     )
 
     fallback = {
@@ -331,8 +340,8 @@ def generate_levelled_hint(
         "You MUST respond in strict JSON format with exactly three keys:\n"
         "{\n"
         '  "hint": "Your progressive hint text here.",\n'
-        '  "level": int,\n'
-        '  "has_next": true | false\n'
+        '  "level": 1,\n'
+        '  "has_next": true\n'
         "}"
     )
 
@@ -342,7 +351,7 @@ def generate_levelled_hint(
         f"Language: {language}\n"
         f"Constraints:\n{constraints_str}\n\n"
         f"User's Current Code:\n```\n{code}\n```\n\n"
-        f"Please give me a Level {level} progressive hint."
+        f"Please give me a Level {level} progressive hint and respond with a valid JSON object only."
     )
 
     fallback = {
@@ -368,7 +377,6 @@ def generate_levelled_hint(
     }
 
 
-
 def analyze_edge_cases(
     problem_title: str,
     code: str,
@@ -382,7 +390,7 @@ def analyze_edge_cases(
         "You MUST respond in strict JSON format with exactly two keys:\n"
         "{\n"
         '  "edge_cases": [\n'
-        '    {"case": "Edge case description", "handled": true / false, "suggestion": "How to handle it."}\n'
+        '    {"case": "Edge case description", "handled": false, "suggestion": "How to handle it."}\n'
         '  ],\n'
         '  "constraints_critique": "Explain what the constraints mean for performance (e.g. an O(N^2) solution will TLE because N is up to 10^5)."\n'
         "}"
@@ -394,7 +402,7 @@ def analyze_edge_cases(
         f"Language: {language}\n"
         f"Constraints:\n{constraints_str}\n\n"
         f"User's Code:\n```\n{code}\n```\n\n"
-        "Please analyze the edge cases and constraints."
+        "Please analyze the edge cases and constraints and respond with a valid JSON object only."
     )
 
     fallback = {
@@ -432,7 +440,7 @@ def answer_custom_question(
         f"Constraints:\n{constraints_str}\n\n"
         f"User's Code:\n```\n{code}\n```\n\n"
         f"User's Question: {question}\n\n"
-        "Please answer this question and return the requested JSON."
+        "Please answer this question and return a valid JSON object only."
     )
 
     fallback = {
@@ -457,7 +465,7 @@ def generate_explain_back_check(
         "Your task is to check if their explanation accurately reflects the logic and algorithm used in their code.\n"
         "You MUST respond in strict JSON format with exactly two keys:\n"
         "{\n"
-        '  "matches": true | false,\n'
+        '  "matches": true,\n'
         '  "discrepancy_note": "Null if matches is true, or a brief explanation if their explanation diverges from what the code actually does."\n'
         "}"
     )
@@ -466,8 +474,13 @@ def generate_explain_back_check(
         f"Language: {language}\n"
         f"User's Code:\n```\n{code}\n```\n\n"
         f"User's Self-Explanation: \"{user_explanation}\"\n\n"
-        "Please check if the explanation matches the code."
+        "Please check if the explanation matches the code and respond with a valid JSON object only."
     )
+
+    fallback = {
+        "matches": True,
+        "discrepancy_note": None
+    }
 
     return query_llm_json(user_prompt, system_prompt, fallback)
 
@@ -490,9 +503,13 @@ def evaluate_mock_approach(problem_title: str, approach_text: str) -> dict:
         "Review the candidate's explanation for the problem:\n"
         "- As long as the candidate proposes a plausible algorithm idea, data structure, or technique (e.g., two pointers, hash map, sliding window, binary search, bfs/dfs, dp, greedy, recursion, sorting): return approved=true with brief encouraging commentary.\n"
         "- Only return approved=false if the candidate states they don't know, provides complete nonsense, or gives no strategy at all.\n\n"
-        "Return ONLY a JSON object: {\"approved\": boolean, \"feedback\": \"Interviewer commentary...\"}"
+        "You MUST respond in strict JSON format with exactly two keys:\n"
+        "{\n"
+        '  "approved": true,\n'
+        '  "feedback": "Interviewer commentary..."\n'
+        "}"
     )
-    prompt = f"Problem: {problem_title}\nCandidate Approach: {approach_text}"
+    prompt = f"Problem: {problem_title}\nCandidate Approach: {approach_text}\n\nPlease evaluate this approach and return a valid JSON object only."
 
     fallback = {
         "approved": True,
@@ -511,18 +528,23 @@ def generate_mock_scorecard(company: str, duration_seconds: int, questions_data:
         "- Base your evaluation STRICTLY on the candidate's attempts and performance during THIS interview session.\n"
         "- If the candidate submitted valid algorithm strategies and solved the questions in 1-2 attempts during the session, assign a verdict of 'Strong Hire' or 'Hire'.\n"
         "- Only assign 'Weak Lean' or 'Needs Practice' if the candidate failed to submit working code or gave incorrect/nonsense strategies during the session.\n\n"
-        "Return ONLY a JSON object with keys:\n"
+        "You MUST respond in strict JSON format with keys:\n"
         "{\n"
-        '  "verdict": "Strong Hire" | "Hire" | "Weak Lean" | "Needs Practice",\n'
-        '  "strategy_score": 1-5,\n'
-        '  "code_quality_score": 1-5,\n'
-        '  "time_management_score": 1-5,\n'
+        '  "verdict": "Strong Hire",\n'
+        '  "strategy_score": 5,\n'
+        '  "code_quality_score": 5,\n'
+        '  "time_management_score": 5,\n'
         '  "overall_summary": "Concise executive summary of performance",\n'
         '  "strengths": ["list of 2-3 key strengths"],\n'
         '  "areas_for_improvement": ["list of 2-3 improvement areas"]\n'
         "}"
     )
-    prompt = f"Company: {company or 'General Tech'}\nTime Spent: {duration_seconds // 60} minutes\nQuestions, Approaches & Session Submissions: {json.dumps(questions_data)}"
+    prompt = (
+        f"Company: {company or 'General Tech'}\n"
+        f"Time Spent: {duration_seconds // 60} minutes\n"
+        f"Questions, Approaches & Session Submissions: {json.dumps(questions_data)}\n\n"
+        "Please generate the scorecard and return a valid JSON object only."
+    )
     
     fallback = {
         "verdict": "Hire",
@@ -535,6 +557,3 @@ def generate_mock_scorecard(company: str, duration_seconds: int, questions_data:
     }
     
     return query_llm_json(prompt, system_prompt, fallback)
-
-
-

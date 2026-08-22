@@ -25,7 +25,20 @@ async function backendFetch(path, { method = "GET", body } = {}) {
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(`${baseUrl}${path}`, opts);
-  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+  if (!res.ok) {
+    let errorDetail = "";
+    try {
+      const errData = await res.json();
+      if (errData && errData.detail) {
+        errorDetail = typeof errData.detail === "string" ? errData.detail : JSON.stringify(errData.detail);
+      }
+    } catch (e) {}
+
+    if (res.status === 429) {
+      throw new Error(errorDetail || "Limit Exceeded: Daily AI request limit reached. Please try again tomorrow.");
+    }
+    throw new Error(errorDetail || `HTTP error! status: ${res.status}`);
+  }
   return res.json();
 }
 

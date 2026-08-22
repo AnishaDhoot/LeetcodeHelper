@@ -349,7 +349,8 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
             return True
         return False
 
-    # 4. Iterate topics collecting at least 3 unique recommendations
+    # 4. Iterate topics collecting at least 3 unique recommendations across distinct topics
+    # Pass 1: Select 1 best candidate per prioritized topic to ensure topic diversity
     for topic_record in prioritized_topics:
         if len(recommendations) >= 3:
             break
@@ -410,7 +411,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                     difficulty_reason = f"Let's build core concepts in {topic} with an Easy problem."
 
         # Build reason string
-        if focus_topic and topic == focus_topic:
+        if focus_list and topic in focus_list:
             reason_prefix = "Focus topic suggestion."
         elif topic_record in overdue_topics:
             reason_prefix = f"Review due for {topic}."
@@ -420,42 +421,57 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
         full_reason = f"{reason_prefix} {difficulty_reason}"
 
         # Prioritise retrying the last failed problem
+        added_for_topic = False
         if recent_attempts and recent_attempts[0].verdict != "Accepted":
             failed_prob = db.query(Problem).filter(
                 Problem.id == recent_attempts[0].problem_id
             ).first()
             if failed_prob and failed_prob.id in base_pool_ids:
-                add_recommendation(
+                if add_recommendation(
                     failed_prob,
                     f"Retry {failed_prob.title} to resolve your last failure: "
                     f"{recent_attempts[0].root_cause_category or 'implementation bug'}.",
-                )
+                ):
+                    added_for_topic = True
 
-        # Primary: problems matching topic & target difficulty (not solved recently)
-        seven_days_ago = get_utc_now() - timedelta(days=7)
-        problems = [
-            p for p in topic_problems if p.difficulty == target_difficulty
-        ]
+        if not added_for_topic:
+            # Primary: problems matching topic & target difficulty (not solved recently)
+            seven_days_ago = get_utc_now() - timedelta(days=7)
+            problems = [
+                p for p in topic_problems if p.difficulty == target_difficulty
+            ]
 
-        for p in problems:
+            for p in problems:
+                recent_success = db.query(Attempt).filter(
+                    Attempt.problem_id == p.id,
+                    Attempt.verdict == "Accepted",
+                    Attempt.timestamp >= seven_days_ago,
+                ).first()
+                if not recent_success:
+                    if add_recommendation(p, full_reason):
+                        added_for_topic = True
+                        break
+
+        # Fallback: any difficulty in topic if nothing added yet
+        if not added_for_topic:
+            for p in topic_problems:
+                if add_recommendation(p, f"{reason_prefix} Practicing topic: {topic}."):
+                    added_for_topic = True
+                    break
+
+    # Pass 2: If fewer than 3 recommendations (e.g. fewer than 3 topics available), fill with more problems from prioritized topics
+    if len(recommendations) < 3:
+        for topic_record in prioritized_topics:
             if len(recommendations) >= 3:
                 break
-            recent_success = db.query(Attempt).filter(
-                Attempt.problem_id == p.id,
-                Attempt.verdict == "Accepted",
-                Attempt.timestamp >= seven_days_ago,
-            ).first()
-            if not recent_success:
-                add_recommendation(p, full_reason)
-
-        # Fallback: any difficulty in topic
-        if len(recommendations) < 3:
+            topic = topic_record.topic
+            topic_problems = [p for p in base_pool if topic in (p.topics or "")]
             for p in topic_problems:
                 if len(recommendations) >= 3:
                     break
-                add_recommendation(p, f"{reason_prefix} Practicing topic: {topic}.")
+                add_recommendation(p, f"Practicing topic: {topic}.")
 
-    # 5. Global fallback
+    # Pass 3: Global fallback if base pool has other problems
     if len(recommendations) < 3:
         for p in base_pool:
             if len(recommendations) >= 3:
@@ -487,6 +503,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                     "title": ep.title,
                     "url": ep.url,
                     "difficulty": ep.difficulty,
+                    "topics": ep.topics,
                     "reason": f"Exploration: trying {exp_topic.topic} to broaden your skills.",
                 }
 

@@ -10,13 +10,21 @@ let rootDiv = document.getElementById(rootId);
 if (!rootDiv) {
   rootDiv = document.createElement('div');
   rootDiv.id = rootId;
-  document.body.appendChild(rootDiv);
+  rootDiv.style.position = 'fixed';
+  rootDiv.style.top = '0';
+  rootDiv.style.right = '0';
+  rootDiv.style.width = '0';
+  rootDiv.style.height = '0';
+  rootDiv.style.zIndex = '2147483647';
+  rootDiv.style.pointerEvents = 'none';
+  (document.documentElement || document.body).appendChild(rootDiv);
 
   const shadowRoot = rootDiv.attachShadow({ mode: 'open' });
 
   // Create wrapper inside shadow root
   const reactContainer = document.createElement('div');
   reactContainer.id = 'dsa-tutor-react-container';
+  reactContainer.style.pointerEvents = 'auto';
   shadowRoot.appendChild(reactContainer);
 
   // Load styling inside Shadow DOM

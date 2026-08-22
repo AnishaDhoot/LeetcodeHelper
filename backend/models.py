@@ -325,9 +325,14 @@ class CheckApproachRequest(BaseModel):
 
 
 class CheckApproachResponse(BaseModel):
-    verdict: str
-    explanation: str
-    suggested_action: str
+    is_optimal: Optional[bool] = False
+    current_complexity: Optional[str] = "O(N)"
+    optimal_complexity: Optional[str] = "O(N)"
+    feedback: Optional[str] = ""
+    alternative_approach: Optional[str] = ""
+    verdict: Optional[str] = "Critique complete"
+    explanation: Optional[str] = ""
+    suggested_action: Optional[str] = ""
 
 
 # --- Levelled hint schemas (Tier 3.1) ---

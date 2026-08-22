@@ -1465,9 +1465,13 @@ export default function App() {
               <div className="info-section error-section">
                 <div className="section-label error-label">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                  Error
+                  {String(coachError).toLowerCase().includes('limit') || String(coachError).toLowerCase().includes('quota') || String(coachError).includes('429') ? 'LIMIT EXCEEDED' : 'ERROR'}
                 </div>
-                <div className="section-content">{coachError}</div>
+                <div className="section-content">
+                  {String(coachError).includes('429') 
+                    ? 'Daily AI request limit reached. Please try again tomorrow.' 
+                    : coachError}
+                </div>
               </div>
             )}
 
@@ -1482,9 +1486,13 @@ export default function App() {
               <div className="info-section error-section">
                 <div className="section-label error-label">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight: '4px'}}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                  Error
+                  {String(error).toLowerCase().includes('limit') || String(error).toLowerCase().includes('quota') || String(error).includes('429') ? 'LIMIT EXCEEDED' : 'ERROR'}
                 </div>
-                <div className="section-content">{error}</div>
+                <div className="section-content">
+                  {String(error).includes('429') 
+                    ? 'Daily AI request limit reached. Please try again tomorrow.' 
+                    : error}
+                </div>
               </div>
             )}
 
