@@ -343,10 +343,13 @@ class CheckApproachResponse(BaseModel):
 
 class ComplexityEstimateRequest(BaseModel):
     problem_id: str
-    user_time: str
-    user_space: str
-    code: str
-    language: str
+    time_complexity: Optional[str] = "O(N)"
+    space_complexity: Optional[str] = "O(1)"
+    user_time: Optional[str] = "O(N)"
+    user_space: Optional[str] = "O(1)"
+    code: Optional[str] = ""
+    language: Optional[str] = "python3"
+    is_contest: Optional[bool] = False
 
 
 class ComplexityRevealRequest(BaseModel):

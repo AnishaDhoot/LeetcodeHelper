@@ -1232,8 +1232,10 @@ def store_complexity_estimate(req: ComplexityEstimateRequest, db: Session = Depe
     """Stores the user's complexity guess before revealing critique (Tier 3.3)."""
     check_active_test_lock(db, is_contest=req.is_contest)
     import json
+    t_comp = req.time_complexity or req.user_time or "O(N)"
+    s_comp = req.space_complexity or req.user_space or "O(1)"
     key = f"estimate_{req.problem_id}"
-    value = json.dumps({"time_complexity": req.time_complexity, "space_complexity": req.space_complexity})
+    value = json.dumps({"time_complexity": t_comp, "space_complexity": s_comp})
     cfg = db.query(UserConfig).filter(UserConfig.key == key).first()
     if cfg:
         cfg.value = value
