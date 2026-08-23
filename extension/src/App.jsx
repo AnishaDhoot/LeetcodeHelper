@@ -74,6 +74,8 @@ export default function App() {
     });
   };
 
+  const [showBadgeSubmitConfirm, setShowBadgeSubmitConfirm] = useState(false);
+
   const abandonBadgeTest = () => {
     if (!window.confirm('Are you sure you want to abandon this Badge Test? All progress for this test will be lost.')) return;
     chrome.runtime.sendMessage({ action: 'abandon_badge_test' }, (res) => {
@@ -87,6 +89,7 @@ export default function App() {
 
   const submitBadgeTest = () => {
     chrome.runtime.sendMessage({ action: 'submit_badge_test' }, (res) => {
+      setShowBadgeSubmitConfirm(false);
       if (res && res.success) {
         alert(res.data?.message || 'Badge Test submitted!');
         setActiveTest(null);
@@ -98,7 +101,7 @@ export default function App() {
     });
   };
 
-  const [aiQuota, setAiQuota] = useState({ used: 0, limit: 500 });
+  const [aiQuota, setAiQuota] = useState({ used: 0, limit: 50 });
 
   const fetchAiQuota = () => {
     chrome.runtime.sendMessage({ action: 'get_ai_quota' }, (res) => {
@@ -1148,7 +1151,7 @@ export default function App() {
               <button
                 className="coach-btn"
                 style={{ padding: '6px 14px', fontSize: '11px', background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
-                onClick={submitBadgeTest}
+                onClick={() => setShowBadgeSubmitConfirm(true)}
               >
                 Submit Test
               </button>
@@ -2117,6 +2120,70 @@ export default function App() {
       </>
     )}
   </div>
+
+      {/* Badge Test Submit Confirmation Modal */}
+      {showBadgeSubmitConfirm && activeTest && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '380px', padding: '18px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #27272a', paddingBottom: '10px', marginBottom: '14px' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                🏆 Submit Badge Test
+              </h3>
+              <button onClick={() => setShowBadgeSubmitConfirm(false)} style={{ background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+            </div>
+
+            <div style={{ fontSize: '12px', color: '#d4d4d8', marginBottom: '12px' }}>
+              Ready to submit your <strong>{activeTest.topic} Level {activeTest.level}</strong> test? Review your progress below:
+            </div>
+
+            <div style={{ background: '#18181b', border: '1px solid #27272a', borderRadius: '8px', padding: '10px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '12px' }}>
+                <span style={{ fontWeight: '500', color: '#f4f4f5' }}>1. {activeTest.problem1?.title}</span>
+                {activeTest.problem1_solved ? (
+                  <span style={{ color: '#22c55e', fontWeight: 'bold', fontSize: '11px' }}>🟢 Solved</span>
+                ) : (
+                  <span style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '11px' }}>🔴 Unsolved</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                <span style={{ fontWeight: '500', color: '#f4f4f5' }}>2. {activeTest.problem2?.title}</span>
+                {activeTest.problem2_solved ? (
+                  <span style={{ color: '#22c55e', fontWeight: 'bold', fontSize: '11px' }}>🟢 Solved</span>
+                ) : (
+                  <span style={{ color: '#ef4444', fontWeight: 'bold', fontSize: '11px' }}>🔴 Unsolved</span>
+                )}
+              </div>
+            </div>
+
+            {(!activeTest.problem1_solved || !activeTest.problem2_solved) ? (
+              <div style={{ background: '#451a03', border: '1px solid #92400e', borderRadius: '6px', padding: '8px 10px', fontSize: '11px', color: '#fde68a', marginBottom: '14px', lineHeight: '1.4' }}>
+                ⚠️ <strong>Unsolved Problems:</strong> You have not solved all problems yet. Submitting now will finalize this attempt. You can click <strong>"Go Back"</strong> to keep solving!
+              </div>
+            ) : (
+              <div style={{ background: '#052e16', border: '1px solid #166534', borderRadius: '6px', padding: '8px 10px', fontSize: '11px', color: '#bbf7d0', marginBottom: '14px', lineHeight: '1.4' }}>
+                ✨ <strong>All Problems Solved!</strong> Submitting now will evaluate your test and unlock your new badge.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                className="abandon-btn"
+                style={{ flex: 1, padding: '8px 12px', fontSize: '12px' }}
+                onClick={() => setShowBadgeSubmitConfirm(false)}
+              >
+                ← Go Back
+              </button>
+              <button
+                className="coach-btn"
+                style={{ flex: 1, padding: '8px 12px', fontSize: '12px', background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
+                onClick={submitBadgeTest}
+              >
+                Confirm Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Scorecard Modal */}
       {showScorecardModal && mockScorecard && (

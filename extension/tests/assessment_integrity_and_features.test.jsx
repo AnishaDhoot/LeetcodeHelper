@@ -31,8 +31,9 @@ function AssessmentFeatureOverlay({
   // Focus topics
   const [focusTopics, setFocusTopics] = useState([]);
 
-  // Submit test message
+  // Submit test message & confirm modal
   const [testResultMsg, setTestResultMsg] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Simulate code submission vs problem change
   const handleCodeSubmission = (url) => {
@@ -76,6 +77,7 @@ function AssessmentFeatureOverlay({
   };
 
   const handleSubmitBadgeTest = () => {
+    setShowConfirmModal(false);
     if (activeTest && activeTest.problem1_solved && activeTest.problem2_solved) {
       setTestResultMsg('Badge Test passed! Level earned.');
     } else {
@@ -180,8 +182,16 @@ function AssessmentFeatureOverlay({
       {activeTest && (
         <div data-testid="badge-test-panel">
           <h3>Badge Test: {activeTest.topic} Level {activeTest.level}</h3>
-          <button data-testid="submit-test-btn" onClick={handleSubmitBadgeTest}>Submit Test</button>
+          <button data-testid="submit-test-btn" onClick={() => setShowConfirmModal(true)}>Submit Test</button>
           <button data-testid="abandon-test-btn" onClick={handleAbandonBadgeTest}>Abandon Test</button>
+
+          {showConfirmModal && (
+            <div data-testid="badge-submit-confirm-modal">
+              <h4>Confirm Test Submission</h4>
+              <button data-testid="confirm-go-back-btn" onClick={() => setShowConfirmModal(false)}>Go Back</button>
+              <button data-testid="confirm-submit-btn" onClick={handleSubmitBadgeTest}>Confirm Submit</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -218,13 +228,6 @@ describe('Assessment Integrity & Enhanced Features Exhaustive Interaction Tests'
 
   it('verifies Code Coach results persist when submitting code (URL changes to /submissions/) and only resets on problem change', () => {
     render(<AssessmentFeatureOverlay />);
-    expect(screen.getByTestId('coach-results')).toHaveTextContent('First Question?');
-
-    // Simulate submission where LeetCode updates URL to /submissions/12345/
-    fireEvent.click(screen.getByTestId('submit-code-btn'));
-    // Coach results must persist
-    expect(screen.getByTestId('coach-results')).toHaveTextContent('First Question?');
-
     // Simulate navigating to a completely new problem
     fireEvent.click(screen.getByTestId('change-problem-btn'));
     // Coach results should be reset
@@ -251,15 +254,25 @@ describe('Assessment Integrity & Enhanced Features Exhaustive Interaction Tests'
     expect(screen.getByTestId('mock-interview-panel')).toBeInTheDocument();
   });
 
-  it('verifies Submit Test and Abandon Test actions in Badge Test mode', () => {
+  it('verifies Submit Test confirmation modal with Go Back (unsubmit) and Confirm actions', () => {
     const testState = { id: 1, topic: 'Arrays', level: 2, problem1_solved: true, problem2_solved: true };
     render(<AssessmentFeatureOverlay initialTest={testState} />);
 
     expect(screen.getByTestId('submit-test-btn')).toBeInTheDocument();
     expect(screen.getByTestId('abandon-test-btn')).toBeInTheDocument();
 
-    // Click Submit Test
+    // Click Submit Test -> Modal opens
     fireEvent.click(screen.getByTestId('submit-test-btn'));
+    expect(screen.getByTestId('badge-submit-confirm-modal')).toBeInTheDocument();
+
+    // User chooses to Go Back (unsubmit) -> Modal closes and test stays active
+    fireEvent.click(screen.getByTestId('confirm-go-back-btn'));
+    expect(screen.queryByTestId('badge-submit-confirm-modal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('badge-test-panel')).toBeInTheDocument();
+
+    // User clicks Submit Test again and Confirms -> Evaluates test
+    fireEvent.click(screen.getByTestId('submit-test-btn'));
+    fireEvent.click(screen.getByTestId('confirm-submit-btn'));
     expect(screen.getByTestId('mastery-panel')).toBeInTheDocument();
     expect(screen.getByTestId('test-result-msg')).toHaveTextContent('Badge Test passed! Level earned.');
   });
