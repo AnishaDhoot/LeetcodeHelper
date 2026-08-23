@@ -272,11 +272,22 @@ const handleVerdictDetected = async (verdict, node) => {
 let lastSubmitClickTimestamp = 0;
 
 document.addEventListener('click', (e) => {
-  const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"]') : null;
+  const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"], [data-cypress="submit-code-btn"]') : null;
   if (!btn) return;
   const txt = (btn.textContent || '').trim().toLowerCase();
-  const locator = btn.getAttribute('data-e2e-locator') || '';
-  if (txt.includes('submit') || txt.includes('run') || locator.includes('submit')) {
+  const locator = (btn.getAttribute('data-e2e-locator') || '').toLowerCase();
+  const testId = (btn.getAttribute('data-testid') || '').toLowerCase();
+  
+  // STRICT CHECK: ONLY track clicks on the actual "Submit" button, NOT "Run" or "Run Code"
+  const isSubmitBtn = (
+    locator.includes('submit') ||
+    testId.includes('submit') ||
+    txt === 'submit' ||
+    txt === 'submit code' ||
+    (txt.includes('submit') && !txt.includes('run'))
+  );
+
+  if (isSubmitBtn) {
     lastSubmitClickTimestamp = Date.now();
   }
 }, true);
@@ -298,6 +309,14 @@ const checkNodeForVerdict = (node) => {
       // Mark element as processed immediately
       processedVerdictNodes.add(node);
       try { node.dataset.dsaProcessed = "true"; } catch (e) {}
+
+      // Ignore verdicts from the sample test case runner ("Run Code" console)
+      const isRunSamplePanel = !!node.closest(
+        '[data-e2e-locator="console-result"], [class*="run-result"], [class*="test-result"], [class*="testcase-result"], [class*="console-result"]'
+      );
+      if (isRunSamplePanel) {
+        return;
+      }
 
       // Ignore pre-existing past historical submission badges rendered on page load (unless user clicked Submit in last 60s)
       const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
