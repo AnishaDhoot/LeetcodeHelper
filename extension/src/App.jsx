@@ -981,9 +981,12 @@ export default function App() {
               if (!isMockMode) {
                 setShowMockCompanyModal(true);
               } else {
-                setIsMockMode(false);
-                if (window.dsaTutor?.setEditorReadOnly) {
-                  window.dsaTutor.setEditorReadOnly(false);
+                if (window.confirm('Are you sure you want to end this mock interview session?')) {
+                  setIsMockMode(false);
+                  setMockSession(null);
+                  if (window.dsaTutor?.setEditorReadOnly) {
+                    window.dsaTutor.setEditorReadOnly(false);
+                  }
                 }
               }
             }}
