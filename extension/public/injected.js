@@ -70,79 +70,16 @@ const applyReadOnlyState = (isReadOnly) => {
   }
 };
 
-window.__dsaTutorInitialModelValues = window.__dsaTutorInitialModelValues || new Map();
-
-const captureModelInitialValues = () => {
-  try {
-    const models = window.monaco?.editor?.getModels() || [];
-    models.forEach(model => {
-      const uriStr = model.uri ? model.uri.toString() : "";
-      if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-        if (!window.__dsaTutorInitialModelValues.has(uriStr)) {
-          const val = model.getValue();
-          if (val && val.trim().length > 0) {
-            window.__dsaTutorInitialModelValues.set(uriStr, val);
-          }
-        }
-      }
-    });
-  } catch (e) {}
-};
-
-// Monkey-patch Monaco model setValue to prevent LeetCode from injecting past solutions during assessments
-const patchMonacoModel = (model) => {
-  if (!model || model.__dsaPatched) return;
-  model.__dsaPatched = true;
-
-  const originalSetValue = model.setValue.bind(model);
-  model.setValue = function(newValue) {
-    if (window.__dsaTutorAssessmentLocked || window.__dsaTutorReadOnly) {
-      const uriStr = model.uri ? model.uri.toString() : "";
-      if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-        const cleaned = cleanStarterCode(newValue);
-        return originalSetValue(cleaned);
-      }
-    }
-    return originalSetValue(newValue);
-  };
-
-  if (window.__dsaTutorAssessmentLocked || window.__dsaTutorReadOnly) {
-    const uriStr = model.uri ? model.uri.toString() : "";
-    if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-      const current = model.getValue();
-      if (current) {
-        const cleaned = cleanStarterCode(current);
-        if (cleaned !== current) {
-          originalSetValue(cleaned);
-        }
-      }
-    }
-  }
-};
-
 // Poll and subscribe to new Monaco editors to lock them automatically
 const initMonacoListeners = () => {
   if (window.monaco && window.monaco.editor) {
-    const models = window.monaco.editor.getModels() || [];
-    models.forEach(patchMonacoModel);
-
-    // Intercept future editor and model creations
+    // Intercept future editor creations
     window.monaco.editor.onDidCreateEditor((editor) => {
       if (window.__dsaTutorReadOnly) {
         editor.updateOptions({ readOnly: true });
       }
-      const model = editor.getModel();
-      if (model) patchMonacoModel(model);
-      setTimeout(captureModelInitialValues, 500);
     });
 
-    if (window.monaco.editor.onDidCreateModel) {
-      window.monaco.editor.onDidCreateModel((model) => {
-        patchMonacoModel(model);
-      });
-    }
-
-    captureModelInitialValues();
     applyReadOnlyState(window.__dsaTutorReadOnly);
   }
 };
@@ -208,11 +145,6 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
     );
 
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
-
-    if (window.monaco?.editor?.getModels) {
-      const models = window.monaco.editor.getModels();
-      models.forEach(patchMonacoModel);
-    }
 
     if (isLocked) {
       // Find all elements matching Solutions, Editorial, Discussion, Submissions History, Comments, or Community
@@ -410,90 +342,6 @@ document.addEventListener("click", (e) => {
   }
 }, true);
 
-const cleanStarterCode = (codeText) => {
-  if (!codeText || typeof codeText !== "string") return "";
-  
-  const lines = codeText.split("\n");
-  const cleanedLines = [];
-  let insideCommentBlock = false;
-  let inMethodBody = false;
-  let methodBraceDepth = 0;
-  const isPython = lines.some(l => l.trim().startsWith("def "));
-
-  if (isPython) {
-    let inDef = false;
-    for (let line of lines) {
-      const trimmed = line.trim();
-      if (line.startsWith("#") || trimmed.startsWith("class ") || trimmed.startsWith("from ") || trimmed.startsWith("import ")) {
-        cleanedLines.push(line);
-        inDef = false;
-      } else if (trimmed.startsWith("def ")) {
-        cleanedLines.push(line);
-        cleanedLines.push("        pass");
-        inDef = true;
-      } else if (!inDef) {
-        cleanedLines.push(line);
-      }
-    }
-    return cleanedLines.join("\n");
-  }
-
-  // C-style languages (Java, C++, JS, TS, C#, Go, Rust, Swift)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    // Preserve comments
-    if (trimmed.startsWith("/*")) insideCommentBlock = true;
-    if (insideCommentBlock || trimmed.startsWith("//") || trimmed.startsWith("*")) {
-      cleanedLines.push(line);
-      if (trimmed.endsWith("*/")) insideCommentBlock = false;
-      continue;
-    }
-
-    // Preserve class / struct / header definitions
-    if (
-      trimmed.startsWith("class ") ||
-      trimmed.startsWith("struct ") ||
-      trimmed.startsWith("impl ") ||
-      trimmed.startsWith("public class ") ||
-      trimmed.startsWith("import ") ||
-      trimmed.startsWith("#include") ||
-      trimmed.startsWith("package ")
-    ) {
-      cleanedLines.push(line);
-      continue;
-    }
-
-    // Detect method signature line ending with { or starting method
-    if (!inMethodBody && (trimmed.endsWith("{") || (trimmed.includes("(") && trimmed.includes(")")))) {
-      cleanedLines.push(line);
-      if (line.includes("{")) {
-        inMethodBody = true;
-        methodBraceDepth = 1;
-        cleanedLines.push("        "); // Blank starter space inside method
-      }
-      continue;
-    }
-
-    if (inMethodBody) {
-      if (trimmed.includes("{")) methodBraceDepth++;
-      if (trimmed.includes("}")) methodBraceDepth--;
-
-      if (methodBraceDepth <= 0) {
-        inMethodBody = false;
-        cleanedLines.push(line); // Keep closing brace
-      }
-      // Skip inner previous solution lines
-      continue;
-    }
-
-    cleanedLines.push(line);
-  }
-
-  return cleanedLines.join("\n");
-};
-
 window.addEventListener("message", (event) => {
   // Only accept messages from ourselves
   if (event.source !== window) return;
@@ -503,7 +351,6 @@ window.addEventListener("message", (event) => {
       const models = window.monaco?.editor?.getModels();
       let code = "";
       if (models && models.length > 0) {
-        // Select the model with the largest code payload that isn't a testcase input
         let bestModel = models[0];
         let maxLen = bestModel.getValue() ? bestModel.getValue().length : 0;
         for (let i = 1; i < models.length; i++) {
@@ -546,14 +393,7 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
-      // Clear cached initial model values so previous solution isn't re-applied
-      window.__dsaTutorInitialModelValues = new Map();
-
-      // Unlock Monaco editor models temporarily to allow setting starter code
-      const editors = window.monaco?.editor?.getEditors() || [];
-      editors.forEach(ed => ed.updateOptions({ readOnly: false }));
-
-      // 1. Try to click LeetCode's native Reset Code button in DOM
+      // 1. Click LeetCode's native Reset Code button in DOM to restore official starter template
       const resetCandidates = Array.from(document.querySelectorAll(
         'button, div[role="button"], span[role="button"], [data-keyup="reset-code"], [data-track-name="reset_code"], [aria-label*="Reset"], [title*="Reset"], [data-cypress="ResetCode"]'
       ));
@@ -574,26 +414,11 @@ window.addEventListener("message", (event) => {
         }, 150);
       }
 
-      // 2. Clean previous solution code from Monaco models, leaving pristine stubs
-      const models = window.monaco?.editor?.getModels();
-      if (models && models.length > 0) {
-        models.forEach(model => {
-          const uriStr = model.uri ? model.uri.toString() : "";
-          if (!uriStr.includes("input") && !uriStr.includes("testcase")) {
-            const currentVal = model.getValue() || "";
-            if (currentVal) {
-              const cleaned = cleanStarterCode(currentVal);
-              if (cleaned && cleaned.trim().length > 0) {
-                model.setValue(cleaned);
-              }
-            }
-          }
-        });
-      }
-
       // Re-apply readOnly state if locked
       if (window.__dsaTutorReadOnly) {
-        editors.forEach(ed => ed.updateOptions({ readOnly: true }));
+        setTimeout(() => {
+          applyReadOnlyState(true);
+        }, 300);
       }
     } catch (e) {
       console.error("[DSA Tutor Injected] Error resetting editor:", e);
@@ -601,7 +426,7 @@ window.addEventListener("message", (event) => {
   }
 });
 
-// Continuously enforce readOnly & overlay state while readOnly is active and record initial model values
+// Continuously enforce readOnly & overlay state while readOnly is active
 setInterval(() => {
   if (window.__dsaTutorReadOnly) {
     applyReadOnlyState(true);
@@ -609,7 +434,6 @@ setInterval(() => {
   if (window.__dsaTutorAssessmentLocked) {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
   }
-  captureModelInitialValues();
 }, 400);
 
 console.log("[DSA Tutor Injected] Scraper script loaded in page context.");
