@@ -43,7 +43,12 @@ def test_complete_dsa_topics_in_mastery():
     assert res.status_code == 200
     data = res.json()
     returned_topics = {item["topic"] for item in data}
-    expected_topics = {"Arrays", "Strings", "Hash Table", "Dynamic Programming", "Trees", "Graphs", "Binary Search", "Two Pointers", "Stack", "Queue", "Heap / Priority Queue", "Sliding Window", "Greedy", "Backtracking", "Linked List", "Bit Manipulation"}
+    expected_topics = {
+        "Arrays", "Strings", "Sliding Window & Two Pointers", "Binary Search",
+        "Linked List", "Stack & Queue", "Hashing", "Recursion & Backtracking",
+        "Trees & BST", "Heaps / Priority Queue", "Graphs", "Dynamic Programming",
+        "Greedy", "Trie & Bit Manipulation"
+    }
     for t in expected_topics:
         assert t in returned_topics
 

@@ -549,10 +549,20 @@ def record_success(problem_id: str, topic: str, time_taken_seconds: Optional[int
 
 
 STANDARD_DSA_TOPICS = [
-    "Arrays", "Strings", "Hash Table", "Dynamic Programming",
-    "Trees", "Graphs", "Binary Search", "Two Pointers",
-    "Stack", "Queue", "Heap / Priority Queue", "Sliding Window",
-    "Greedy", "Backtracking", "Linked List", "Bit Manipulation"
+    "Arrays",
+    "Strings",
+    "Sliding Window & Two Pointers",
+    "Binary Search",
+    "Linked List",
+    "Stack & Queue",
+    "Hashing",
+    "Recursion & Backtracking",
+    "Trees & BST",
+    "Heaps / Priority Queue",
+    "Graphs",
+    "Dynamic Programming",
+    "Greedy",
+    "Trie & Bit Manipulation"
 ]
 
 @app.get("/topics/mastery", response_model=List[TopicMasterySchema])
