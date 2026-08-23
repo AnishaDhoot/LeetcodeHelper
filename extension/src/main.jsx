@@ -271,6 +271,7 @@ const handleVerdictDetected = async (verdict, node) => {
 
 let lastSubmitClickTimestamp = 0;
 
+// Mouse click detection for Submit button
 document.addEventListener('click', (e) => {
   const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"], [data-cypress="submit-code-btn"]') : null;
   if (!btn) return;
@@ -291,6 +292,25 @@ document.addEventListener('click', (e) => {
     lastSubmitClickTimestamp = Date.now();
   }
 }, true);
+
+// Keyboard shortcut detection (Ctrl+Enter / Cmd+Enter on LeetCode)
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    lastSubmitClickTimestamp = Date.now();
+  }
+}, true);
+
+// SPA URL change listener to keep problem state in sync
+let lastHref = window.location.href;
+const checkUrlChange = () => {
+  if (window.location.href !== lastHref) {
+    lastHref = window.location.href;
+    window.dispatchEvent(new CustomEvent('dsa-tutor-url-change', { detail: { url: lastHref } }));
+  }
+};
+window.addEventListener('popstate', checkUrlChange);
+window.addEventListener('hashchange', checkUrlChange);
+setInterval(checkUrlChange, 1000);
 
 const processedVerdictNodes = new WeakSet();
 const lastDetectedSubmissions = new Map();
@@ -320,7 +340,8 @@ const checkNodeForVerdict = (node) => {
 
       // Ignore pre-existing past historical submission badges rendered on page load (unless user clicked Submit in last 60s)
       const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
-      if (lastSubmitClickTimestamp === 0 || timeSinceSubmit > 60000) {
+      const isExplicitSubmissionResult = !!node.closest('[data-e2e-locator="submission-result"], [class*="submission-result"]');
+      if (!isExplicitSubmissionResult && (lastSubmitClickTimestamp === 0 || timeSinceSubmit > 60000)) {
         return;
       }
 
@@ -329,8 +350,8 @@ const checkNodeForVerdict = (node) => {
       const now = Date.now();
       const lastTime = lastDetectedSubmissions.get(subKey) || 0;
 
-      // Suppress duplicate triggers for the same problem + verdict within 45 seconds
-      if (now - lastTime < 45000) {
+      // Suppress duplicate triggers for the same problem + verdict within 3 seconds
+      if (now - lastTime < 3000) {
         return;
       }
 
