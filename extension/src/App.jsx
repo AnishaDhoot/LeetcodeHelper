@@ -888,7 +888,7 @@ export default function App() {
 
   if (!isOpen) {
     return (
-      <div className="tutor-trigger" onClick={() => setIsOpen(true)} title="Open Kode">
+      <div className="tutor-trigger" onClick={() => setIsOpen(true)} title="Open CodeCoach">
         {/* Bracket mark */}
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/>
@@ -970,7 +970,7 @@ export default function App() {
               <path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>
             </svg>
           </span>
-          Kode
+          CodeCoach
           <span style={{ fontSize: '11px', background: '#27272a', padding: '2px 6px', borderRadius: '10px', color: '#f59e0b', fontWeight: '500' }}>
             🔥 {streakData.current_streak_days}d
           </span>
@@ -2275,7 +2275,7 @@ export default function App() {
             AI Daily Limit: {aiQuota.limit - aiQuota.used}/{aiQuota.limit} left
           </span>
         )}
-        <span style={{color:'#27272a'}}>Kode v1</span>
+        <span style={{color:'#27272a'}}>CodeCoach v1</span>
       </div>
     </div>
   );

@@ -50,7 +50,7 @@ const applyReadOnlyState = (isReadOnly) => {
             <div style="background: #18181b; border: 1px solid #27272a; padding: 18px 24px; border-radius: 10px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6); text-align: center; max-width: 320px;">
               <div style="font-size: 22px; margin-bottom: 6px;">🔒</div>
               <div style="font-size: 14px; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">Mock Interview Gated</div>
-              <div style="font-size: 11px; color: #a1a1aa; line-height: 1.4;">Submit your verbal strategy in the Kode panel to unlock the code editor.</div>
+              <div style="font-size: 11px; color: #a1a1aa; line-height: 1.4;">Submit your verbal strategy in the CodeCoach panel to unlock the code editor.</div>
             </div>
           `;
           const currentPos = getComputedStyle(editorEl).position;
