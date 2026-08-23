@@ -54,7 +54,7 @@ from backend.recommender import (
     get_topic_time_trend,
     filter_problems_for_topic
 )
-from backend.seed import seed_db
+from backend.seed import seed_db, SEED_DATA
 
 # Ensure tables are created (just in case)
 Base.metadata.create_all(bind=engine)
@@ -640,39 +640,57 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     if target_level > 5:
         raise HTTPException(status_code=400, detail="Maximum badge level (Diamond) already achieved.")
 
-    # Select 2 non-premium problems for the test
-    topic_clean = req.topic.replace("Arrays & Hashing", "Array").replace("Trees & BST", "Tree").replace("Graphs", "Graph")
-    raw_problems = db.query(Problem).filter(
-        Problem.topics.like(f"%{topic_clean}%"),
-        Problem.is_premium == False
-    ).all()
-    if not raw_problems:
+    import random
+
+    # Select 2 random non-premium problems from the curated list for this topic and target level
+    curated_candidates = []
+    for t in SEED_DATA.get("topics", []):
+        if t["name"].lower() == req.topic.lower():
+            for b in t.get("badges", []):
+                if b["level"] == target_level:
+                    slugs = [q["slug"] for q in b.get("questions", [])]
+                    curated_candidates = db.query(Problem).filter(
+                        Problem.id.in_(slugs),
+                        Problem.is_premium == False
+                    ).all()
+                    break
+            break
+
+    if len(curated_candidates) >= 2:
+        selected = random.sample(curated_candidates, 2)
+    else:
+        # Fallback to database topic filtering
+        topic_clean = req.topic.replace("Arrays & Hashing", "Array").replace("Trees & BST", "Tree").replace("Graphs", "Graph")
         raw_problems = db.query(Problem).filter(
-            Problem.topics.like(f"%{req.topic}%"),
+            Problem.topics.like(f"%{topic_clean}%"),
             Problem.is_premium == False
         ).all()
+        if not raw_problems:
+            raw_problems = db.query(Problem).filter(
+                Problem.topics.like(f"%{req.topic}%"),
+                Problem.is_premium == False
+            ).all()
 
-    # Filter out secondary conflicting tags (Trees, Graphs, BFS, DFS, DP, Trie, etc.) for pure topic tests
-    problems = filter_problems_for_topic(raw_problems, req.topic)
+        problems = filter_problems_for_topic(raw_problems, req.topic)
 
-    if target_level == 1:
-        targets = ["Easy"]
-    elif target_level in [2, 3]:
-        targets = ["Medium"]
-    elif target_level == 4:
-        targets = ["Medium", "Hard"]
-    else:
-        targets = ["Hard"]
+        if target_level == 1:
+            targets = ["Easy"]
+        elif target_level in [2, 3]:
+            targets = ["Medium"]
+        elif target_level == 4:
+            targets = ["Medium", "Hard"]
+        else:
+            targets = ["Hard"]
 
-    candidates = [p for p in problems if p.difficulty in targets and not p.is_premium]
-    if len(candidates) < 2:
-        candidates = [p for p in problems if not p.is_premium]
-    if len(candidates) < 2:
-        candidates = filter_problems_for_topic(db.query(Problem).filter(Problem.is_premium == False).all(), req.topic)
-        candidates = [p for p in candidates if not p.is_premium]
+        candidates = [p for p in problems if p.difficulty in targets and not p.is_premium]
+        if len(candidates) < 2:
+            candidates = [p for p in problems if not p.is_premium]
+        if len(candidates) < 2:
+            candidates = filter_problems_for_topic(db.query(Problem).filter(Problem.is_premium == False).all(), req.topic)
+            candidates = [p for p in candidates if not p.is_premium]
 
-    import random
-    selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]
+        selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]
+
     if len(selected) < 2:
         raise HTTPException(status_code=500, detail="Not enough problems in database to start test.")
 
