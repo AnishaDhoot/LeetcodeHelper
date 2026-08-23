@@ -330,20 +330,22 @@ const checkNodeForVerdict = (node) => {
       processedVerdictNodes.add(node);
       try { node.dataset.dsaProcessed = "true"; } catch (e) {}
 
-      // Ignore verdicts from the sample test case runner ("Run Code" console)
+      // STRICT CHECK 1: Ignore all verdicts from sample test runner / console / testcase tabs
       const isRunSamplePanel = !!node.closest(
-        '[data-e2e-locator="console-result"], [class*="run-result"], [class*="test-result"], [class*="testcase-result"], [class*="console-result"]'
+        '[data-e2e-locator="console-result"], [data-layout-path*="console"], [data-layout-path*="testcase"], [class*="console"], [class*="testcase"], [class*="run-code"], [class*="run-result"], [class*="test-result"], [class*="testcase-result"], div[id*="testcase"], div[id*="console"]'
       );
       if (isRunSamplePanel) {
         return;
       }
 
-      // Ignore pre-existing past historical submission badges rendered on page load (unless user clicked Submit in last 60s)
+      // STRICT CHECK 2: User MUST have initiated a real submit action (Submit button or Ctrl+Enter) within the last 45 seconds
       const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
-      const isExplicitSubmissionResult = !!node.closest('[data-e2e-locator="submission-result"], [class*="submission-result"]');
-      if (!isExplicitSubmissionResult && (lastSubmitClickTimestamp === 0 || timeSinceSubmit > 60000)) {
+      if (lastSubmitClickTimestamp === 0 || timeSinceSubmit > 45000) {
         return;
       }
+
+      // Reset submission timestamp immediately to prevent duplicate triggers
+      lastSubmitClickTimestamp = 0;
 
       const { problemId } = scrapeProblemIdentity();
       const subKey = `${problemId}_${v}`;

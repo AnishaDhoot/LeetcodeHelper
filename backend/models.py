@@ -263,6 +263,8 @@ class RecommendationItem(BaseModel):
     url: str
     difficulty: str
     reason: str
+    topics: Optional[str] = None
+    companies: Optional[str] = None
 
 
 class ReviewItem(BaseModel):
@@ -272,6 +274,8 @@ class ReviewItem(BaseModel):
     difficulty: str
     due_date: datetime
     stage: int
+    topics: Optional[str] = None
+    companies: Optional[str] = None
 
 
 class ProblemRecommendResponse(BaseModel):

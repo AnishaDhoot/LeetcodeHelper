@@ -284,6 +284,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                 "due_date": r.next_due,
                 "stage": r.stage,
                 "topics": prob.topics,
+                "companies": prob.companies,
             })
             due_problem_ids.add(prob.id)
 
@@ -344,6 +345,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                 "difficulty": p.difficulty,
                 "reason": reason,
                 "topics": p.topics,
+                "companies": p.companies,
             })
             recommended_ids.add(p.id)
             return True

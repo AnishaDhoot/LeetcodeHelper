@@ -1806,7 +1806,6 @@ export default function App() {
         {/* TAB 3: RECOMMENDATION */}
         {!activeTest && !isMockMode && activeTab === 'recommendation' && (
           <div>
-            {/* Company Tag Filter (Tier 1.1) */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', background: '#141416', padding: '8px 12px', borderRadius: '8px', border: '1px solid #27272a' }}>
               <span style={{ fontSize: '11px', color: '#a1a1aa' }}>🏢 Target Company:</span>
               <select
@@ -1818,7 +1817,9 @@ export default function App() {
                 style={{ background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', padding: '4px 8px', fontSize: '12px', cursor: 'pointer' }}
               >
                 <option value="">All Companies</option>
-                {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                {Array.from(new Set([...(companies || []), 'Google', 'Meta', 'Amazon', 'Microsoft', 'Apple', 'Uber', 'Bloomberg', 'Netflix', 'ByteDance', 'Adobe', 'Salesforce'])).sort().map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
               </select>
             </div>
 
@@ -1842,6 +1843,13 @@ export default function App() {
                           {rec.difficulty}
                         </span>
                       </div>
+
+                      {rec.companies && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', margin: '4px 0', fontSize: '11px', color: '#60a5fa', fontWeight: '500' }}>
+                          <span>🏢 {rec.companies}</span>
+                        </div>
+                      )}
+
                       <div className="rec-reason">
                         {rec.reason}
                       </div>
@@ -1900,6 +1908,13 @@ export default function App() {
                               {rev.difficulty}
                             </span>
                           </div>
+
+                          {rev.companies && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', margin: '3px 0', fontSize: '10px', color: '#60a5fa', fontWeight: '500' }}>
+                              <span>🏢 {rev.companies}</span>
+                            </div>
+                          )}
+
                           <div className="review-meta" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <span className={`review-badge stage-${rev.stage}`}>
                               Review {rev.stage} ({rev.stage === 1 ? '3d' : rev.stage === 2 ? '7d' : '14d'})
@@ -1926,12 +1941,15 @@ export default function App() {
                           )}
                         </div>
                         <a
-                          className="review-action-btn"
+                          className="review-link-btn"
                           href={rev.url}
-                          target="_top"
-                          title="Attempt Review"
+                          target="_self"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            window.location.href = rev.url;
+                          }}
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                          Review Now →
                         </a>
                       </div>
                     );
