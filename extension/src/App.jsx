@@ -194,6 +194,8 @@ export default function App() {
   const [isMockMode, setIsMockMode] = useState(false);
   const [mockSession, setMockSession] = useState(null);
   const [mockApproachText, setMockApproachText] = useState('');
+  const [mockTimeComplexity, setMockTimeComplexity] = useState('O(N)');
+  const [mockSpaceComplexity, setMockSpaceComplexity] = useState('O(1)');
   const [mockApproachSubmitted, setMockApproachSubmitted] = useState(false);
   const [mockTimerSeconds, setMockTimerSeconds] = useState(7200);
 
@@ -344,12 +346,26 @@ export default function App() {
 
   const submitMockApproach = () => {
     if (!mockApproachText.trim() || !mockSession) return;
-    chrome.runtime.sendMessage({ action: 'mock_approach', payload: { session_id: mockSession.session_id, approach_text: mockApproachText } }, (res) => {
+    chrome.runtime.sendMessage({
+      action: 'mock_approach',
+      payload: {
+        session_id: mockSession.session_id,
+        approach_text: mockApproachText,
+        time_complexity: mockTimeComplexity,
+        space_complexity: mockSpaceComplexity
+      }
+    }, (res) => {
       if (res && res.success && res.data) {
         const approved = !!res.data.approved;
         setMockApproachSubmitted(approved);
         if (window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(!approved);
+        }
+        if (approved) {
+          // Reset editor to restore official LeetCode template
+          if (window.dsaTutor?.resetEditor) {
+            window.dsaTutor.resetEditor();
+          }
         }
         fetchActiveMock(); // Refresh active mock to receive AI feedback
       }
@@ -922,7 +938,9 @@ export default function App() {
                 style={{ width: '100%', background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', padding: '6px', fontSize: '12px' }}
               >
                 <option value="">Random / General (No Company)</option>
-                {companies.map(c => <option key={c} value={c}>{c}</option>)}
+                {Array.from(new Set([...(companies || []), 'Google', 'Meta', 'Amazon', 'Microsoft', 'Apple', 'Uber', 'Bloomberg', 'Netflix', 'ByteDance', 'Adobe', 'Salesforce', 'Goldman Sachs', 'LinkedIn', 'Oracle', 'PayPal', 'Flipkart'])).sort().map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
               </select>
             </div>
 
@@ -1254,7 +1272,7 @@ export default function App() {
                 {!mockApproachSubmitted ? (
                   <div style={{ marginTop: '8px' }}>
                     <div style={{ fontSize: '11px', color: '#fbbf24', marginBottom: '4px', fontWeight: '500' }}>
-                      🔒 Code Editor Locked! Write your algorithm approach & time/space complexity to unlock:
+                      🔒 Code Editor Locked! Write your algorithm approach & complexity to unlock:
                     </div>
                     {mockSession.ai_feedback_list && mockSession.ai_feedback_list[mockSession.current_question_index] && (
                       <div style={{ background: '#18181b', border: '1px solid #3f3f46', borderLeft: '3px solid #f59e0b', borderRadius: '4px', padding: '8px', fontSize: '11px', color: '#fcd34d', lineHeight: '1.4', marginBottom: '8px' }}>
@@ -1264,13 +1282,49 @@ export default function App() {
                     <textarea
                       className="ask-input"
                       rows={3}
-                      placeholder="e.g. Using Two Pointers algorithm. Time complexity O(N), Space complexity O(1)..."
+                      placeholder="e.g. Using Two Pointers with left and right indices. Iterate while left < right..."
                       value={mockApproachText}
                       onChange={(e) => setMockApproachText(e.target.value)}
-                      style={{ fontSize: '12px' }}
+                      style={{ fontSize: '12px', marginBottom: '8px' }}
                     />
-                    <button className="coach-btn" style={{ marginTop: '6px', width: '100%' }} onClick={submitMockApproach}>
-                      Submit Approach to AI Interviewer & Unlock Editor
+
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', fontSize: '10px', color: '#a1a1aa', marginBottom: '3px' }}>
+                          ⏱ Expected Time:
+                        </label>
+                        <select
+                          value={mockTimeComplexity}
+                          onChange={(e) => setMockTimeComplexity(e.target.value)}
+                          style={{ width: '100%', background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '4px', padding: '4px 6px', fontSize: '11px' }}
+                        >
+                          <option value="O(1)">O(1) Constant</option>
+                          <option value="O(log N)">O(log N) Logarithmic</option>
+                          <option value="O(N)">O(N) Linear</option>
+                          <option value="O(N log N)">O(N log N) Linearithmic</option>
+                          <option value="O(N^2)">O(N^2) Quadratic</option>
+                          <option value="O(2^N)">O(2^N) Exponential</option>
+                        </select>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: 'block', fontSize: '10px', color: '#a1a1aa', marginBottom: '3px' }}>
+                          💾 Expected Space:
+                        </label>
+                        <select
+                          value={mockSpaceComplexity}
+                          onChange={(e) => setMockSpaceComplexity(e.target.value)}
+                          style={{ width: '100%', background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '4px', padding: '4px 6px', fontSize: '11px' }}
+                        >
+                          <option value="O(1)">O(1) In-place / Aux</option>
+                          <option value="O(log N)">O(log N) Call stack</option>
+                          <option value="O(N)">O(N) Linear (Map/Array)</option>
+                          <option value="O(N^2)">O(N^2) 2D Grid</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <button className="coach-btn" style={{ marginTop: '2px', width: '100%' }} onClick={submitMockApproach}>
+                      Submit Approach & Complexities to Unlock Editor
                     </button>
                   </div>
                 ) : (

@@ -485,8 +485,8 @@ def generate_explain_back_check(
     return query_llm_json(user_prompt, system_prompt, fallback)
 
 
-def evaluate_mock_approach(problem_title: str, approach_text: str) -> dict:
-    """Evaluates user's verbal strategy for a mock interview question."""
+def evaluate_mock_approach(problem_title: str, approach_text: str, time_complexity: str = "O(N)", space_complexity: str = "O(1)") -> dict:
+    """Evaluates user's verbal strategy and expected time/space complexity for a mock interview question."""
     text_clean = (approach_text or "").strip().lower()
 
     invalid_phrases = ["idk", "i don't know", "dont know", "no idea", "asdf", "skip", "pass", "help", "dunno", "na", "n/a", "none"]
@@ -499,21 +499,27 @@ def evaluate_mock_approach(problem_title: str, approach_text: str) -> dict:
         }
 
     system_prompt = (
-        "You are a Senior Technical Interviewer at a top tech company evaluating a candidate's verbal strategy before coding.\n"
-        "Review the candidate's explanation for the problem:\n"
-        "- As long as the candidate proposes a plausible algorithm idea, data structure, or technique (e.g., two pointers, hash map, sliding window, binary search, bfs/dfs, dp, greedy, recursion, sorting): return approved=true with brief encouraging commentary.\n"
+        "You are a Senior Technical Interviewer at a top tech company evaluating a candidate's verbal strategy and complexity analysis before coding.\n"
+        "Review the candidate's explanation and complexity estimates for the problem:\n"
+        "- As long as the candidate proposes a plausible algorithm idea, data structure, or technique (e.g., two pointers, hash map, sliding window, binary search, bfs/dfs, dp, greedy, recursion, sorting) with reasonable time and space complexity estimates: return approved=true with brief commentary addressing their strategy and complexity analysis.\n"
         "- Only return approved=false if the candidate states they don't know, provides complete nonsense, or gives no strategy at all.\n\n"
         "You MUST respond in strict JSON format with exactly two keys:\n"
         "{\n"
         '  "approved": true,\n'
-        '  "feedback": "Interviewer commentary..."\n'
+        '  "feedback": "Interviewer commentary addressing candidate approach and time/space complexity..."\n'
         "}"
     )
-    prompt = f"Problem: {problem_title}\nCandidate Approach: {approach_text}\n\nPlease evaluate this approach and return a valid JSON object only."
+    prompt = (
+        f"Problem: {problem_title}\n"
+        f"Candidate Approach: {approach_text}\n"
+        f"Expected Time Complexity: {time_complexity}\n"
+        f"Expected Space Complexity: {space_complexity}\n\n"
+        "Please evaluate this approach and return a valid JSON object only."
+    )
 
     fallback = {
         "approved": True,
-        "feedback": f"Interviewer: 'Strategy received! Using {approach_text[:60]}... is a valid approach. Editor is UNLOCKED. Good luck!'"
+        "feedback": f"Interviewer: 'Strategy received! Using {approach_text[:60]}... with time {time_complexity} and space {space_complexity} is a solid plan. Editor is UNLOCKED. Good luck!'"
     }
 
     return query_llm_json(prompt, system_prompt, fallback)

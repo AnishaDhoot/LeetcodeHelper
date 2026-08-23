@@ -471,6 +471,7 @@ class MockStartRequest(BaseModel):
 
 class MockStartResponse(BaseModel):
     session_id: int
+    company: Optional[str] = None
     problem_id: str
     problem_title: str
     problem_url: str
@@ -491,6 +492,8 @@ class MockStartResponse(BaseModel):
 class MockApproachRequest(BaseModel):
     session_id: int
     approach_text: str
+    time_complexity: Optional[str] = "O(N)"
+    space_complexity: Optional[str] = "O(1)"
 
 
 class MockSubmitRequest(BaseModel):

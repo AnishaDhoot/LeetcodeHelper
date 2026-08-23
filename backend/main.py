@@ -1397,9 +1397,9 @@ def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
     problem_urls = [p.url for p in probs]
     difficulties = [p.difficulty for p in probs]
     approaches_submitted_list = [False, False, False]
-
     return MockStartResponse(
         session_id=session.id,
+        company=session.company,
         problem_id=probs[0].id,
         problem_title=probs[0].title,
         problem_url=probs[0].url,
@@ -1428,25 +1428,25 @@ def get_active_mock_interview(db: Session = Depends(get_db)):
     if elapsed > session.time_limit_seconds:
         return None
 
-    # Parse multi-problem lists
-    problem_ids_str = session.problem_ids
-    if not problem_ids_str:
-        problem_ids_str = session.problem_id
-        
-    problem_ids = [pid.strip() for pid in problem_ids_str.split(",") if pid.strip()]
-    probs = [db.query(Problem).filter(Problem.id == pid).first() for pid in problem_ids]
-    probs = [p for p in probs if p is not None]
-    
+    probs = []
+    if session.problem_ids:
+        pids = [pid.strip() for pid in session.problem_ids.split(",") if pid.strip()]
+        probs = db.query(Problem).filter(Problem.id.in_(pids)).all()
+        # Sort in the order of pids
+        prob_map = {p.id: p for p in probs}
+        probs = [prob_map[pid] for pid in pids if pid in prob_map]
+
+    if not probs:
+        p = db.query(Problem).filter(Problem.id == session.problem_id).first()
+        probs = [p] if p else []
+
     if not probs:
         return None
-        
-    while len(probs) < 3:
-        probs.append(probs[0])
-        
-    cur_idx = session.current_question_index
+
+    cur_idx = session.current_question_index or 0
     if cur_idx >= len(probs):
         cur_idx = 0
-        
+
     cur_prob = probs[cur_idx]
     
     # Parse approaches submitted status
@@ -1481,6 +1481,7 @@ def get_active_mock_interview(db: Session = Depends(get_db)):
 
     return {
         "session_id": session.id,
+        "company": session.company,
         "problem_id": cur_prob.id,
         "problem_title": cur_prob.title,
         "problem_url": cur_prob.url,
@@ -1518,7 +1519,12 @@ def submit_mock_approach(req: MockApproachRequest, db: Session = Depends(get_db)
     prob_title = cur_prob.title if cur_prob else cur_prob_id
 
     from backend.agent import evaluate_mock_approach
-    eval_res = evaluate_mock_approach(prob_title, req.approach_text)
+    eval_res = evaluate_mock_approach(
+        prob_title,
+        req.approach_text,
+        time_complexity=req.time_complexity or "O(N)",
+        space_complexity=req.space_complexity or "O(1)"
+    )
     is_approved = eval_res.get("approved", False)
 
     appr_sub = ["0", "0", "0"]

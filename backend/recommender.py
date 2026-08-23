@@ -438,16 +438,30 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
 
         if not added_for_topic:
             # Primary: problems matching topic & target difficulty (not solved recently)
-            seven_days_ago = get_utc_now() - timedelta(days=7)
+            fourteen_days_ago = get_utc_now() - timedelta(days=14)
             problems = [
                 p for p in topic_problems if p.difficulty == target_difficulty
             ]
+
+            # Sort: never solved first, then oldest solved
+            def _solve_recency_score(prob):
+                last_acc = db.query(Attempt).filter(
+                    Attempt.problem_id == prob.id,
+                    Attempt.verdict == "Accepted"
+                ).order_by(desc(Attempt.timestamp)).first()
+                if not last_acc:
+                    return 0  # Highest priority: never solved
+                if last_acc.timestamp < fourteen_days_ago:
+                    return 1  # Solved long ago
+                return 2  # Solved recently
+
+            problems.sort(key=_solve_recency_score)
 
             for p in problems:
                 recent_success = db.query(Attempt).filter(
                     Attempt.problem_id == p.id,
                     Attempt.verdict == "Accepted",
-                    Attempt.timestamp >= seven_days_ago,
+                    Attempt.timestamp >= fourteen_days_ago,
                 ).first()
                 if not recent_success:
                     if add_recommendation(p, full_reason):
@@ -456,7 +470,9 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
 
         # Fallback: any difficulty in topic if nothing added yet
         if not added_for_topic:
-            for p in topic_problems:
+            sorted_topic_problems = list(topic_problems)
+            sorted_topic_problems.sort(key=lambda pr: 0 if not getattr(pr, 'is_solved', False) else 1)
+            for p in sorted_topic_problems:
                 if add_recommendation(p, f"{reason_prefix} Practicing topic: {topic}."):
                     added_for_topic = True
                     break
@@ -506,6 +522,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                     "url": ep.url,
                     "difficulty": ep.difficulty,
                     "topics": ep.topics,
+                    "companies": ep.companies,
                     "reason": f"Exploration: trying {exp_topic.topic} to broaden your skills.",
                 }
 
