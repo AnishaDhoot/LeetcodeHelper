@@ -314,6 +314,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "submit_badge_test") {
+    backendFetch("/badge-test/submit", { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   // --- AI quota and active mock interview actions ---
   if (request.action === "get_ai_quota") {
     backendFetch("/ai/quota")
@@ -475,8 +482,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "set_focus") {
-    const topic = request.payload?.topic || "";
-    backendFetch(`/topics/focus?topic=${encodeURIComponent(topic)}`, { method: "POST" })
+    backendFetch("/topics/focus", { method: "POST", body: request.payload })
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;

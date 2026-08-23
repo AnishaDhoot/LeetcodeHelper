@@ -31,7 +31,7 @@ def test_ai_quota_endpoint_returns_accurate_contract():
     data = res.json()
     assert "used" in data and isinstance(data["used"], int)
     assert "limit" in data and isinstance(data["limit"], int)
-    assert data["limit"] == 50
+    assert data["limit"] == 500
 
 def test_missing_required_fields_returns_422_validation_error():
     """Verifies FastAPI pydantic validation catches missing required fields."""

@@ -85,7 +85,20 @@ export default function App() {
     });
   };
 
-  const [aiQuota, setAiQuota] = useState({ used: 0, limit: 15 });
+  const submitBadgeTest = () => {
+    chrome.runtime.sendMessage({ action: 'submit_badge_test' }, (res) => {
+      if (res && res.success) {
+        alert(res.data?.message || 'Badge Test submitted!');
+        setActiveTest(null);
+        setActiveTab('mastery');
+        fetchMastery();
+      } else {
+        alert(res?.error || 'Failed to submit Badge Test.');
+      }
+    });
+  };
+
+  const [aiQuota, setAiQuota] = useState({ used: 0, limit: 500 });
 
   const fetchAiQuota = () => {
     chrome.runtime.sendMessage({ action: 'get_ai_quota' }, (res) => {
@@ -522,7 +535,7 @@ export default function App() {
         setCoachLoading(null);
         fetchAiQuota();
         if (response && response.success) {
-          setAskResults(prev => [...prev, { id: Date.now(), question: currentQ, answer: response.data.answer }]);
+          setAskResults(prev => [{ id: Date.now(), question: currentQ, answer: response.data.answer }, ...prev]);
           setAskInput('');
           setCoachFilter('ask');
           setIsOpen(true);
@@ -644,29 +657,30 @@ export default function App() {
     }
   };
 
-  // Instant URL change listener + fast polling to detect problem navigation
+  // Instant problem change listener to detect problem navigation (only resets on problem slug change)
   useEffect(() => {
-    let lastUrl = window.location.href;
+    let lastProblemSlug = currentProblemId;
 
     const checkProblemChange = () => {
       try {
-        const currentUrl = window.location.href;
         const identity = window.dsaTutor?.getIdentity ? window.dsaTutor.getIdentity() : null;
-        if (identity && (identity.problemId !== currentProblemId || currentUrl !== lastUrl)) {
-          lastUrl = currentUrl;
-          setCurrentProblemId(identity.problemId);
-          clearCurrentCoachState();
-          fetchProblemDetails(identity.problemId);
+        if (identity && identity.problemId && identity.problemId !== 'unknown-problem') {
+          if (identity.problemId !== lastProblemSlug) {
+            lastProblemSlug = identity.problemId;
+            setCurrentProblemId(identity.problemId);
+            clearCurrentCoachState();
+            fetchProblemDetails(identity.problemId);
 
-          // If active badge test is running, clear previous answers
-          if (activeTest && window.dsaTutor?.resetEditor) {
-            setTimeout(() => window.dsaTutor.resetEditor(), 500);
-          }
+            // If active badge test is running and moving to a new question, reset editor once
+            if (activeTest && window.dsaTutor?.resetEditor) {
+              setTimeout(() => window.dsaTutor.resetEditor(), 500);
+            }
 
-          // If active mock interview is running and strategy is not submitted, lock & reset editor
-          if (isMockMode && mockSession && !mockApproachSubmitted) {
-            if (window.dsaTutor?.setEditorReadOnly) window.dsaTutor.setEditorReadOnly(true);
-            if (window.dsaTutor?.resetEditor) setTimeout(() => window.dsaTutor.resetEditor(), 500);
+            // If active mock interview is running and strategy is not submitted, lock & reset editor
+            if (isMockMode && mockSession && !mockApproachSubmitted) {
+              if (window.dsaTutor?.setEditorReadOnly) window.dsaTutor.setEditorReadOnly(true);
+              if (window.dsaTutor?.resetEditor) setTimeout(() => window.dsaTutor.resetEditor(), 500);
+            }
           }
         }
       } catch (e) {
@@ -682,7 +696,7 @@ export default function App() {
       window.removeEventListener('popstate', checkProblemChange);
       clearInterval(interval);
     };
-  }, [currentProblemId]);
+  }, [currentProblemId, activeTest, isMockMode, mockSession, mockApproachSubmitted]);
 
   // Mock interview timer
   useEffect(() => {
@@ -699,39 +713,22 @@ export default function App() {
     return () => clearInterval(t);
   }, [isMockMode, mockSession]);
 
-  // Enforce editor locking and clear previous solution attempts during Mock Interview & Badge Test modes
+  // Enforce editor locking and read-only protection during Mock Interview
   useEffect(() => {
     if (activeTest) {
       if (window.dsaTutor?.setEditorReadOnly) {
         window.dsaTutor.setEditorReadOnly(false);
       }
-      if (window.dsaTutor?.resetEditor) {
-        window.dsaTutor.resetEditor();
-      }
-      const t1 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 800);
-      const t2 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 2000);
-      return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
-      };
     } else if (isMockMode && !mockApproachSubmitted) {
       if (window.dsaTutor?.setEditorReadOnly) {
         window.dsaTutor.setEditorReadOnly(true);
       }
-      if (window.dsaTutor?.resetEditor) {
-        window.dsaTutor.resetEditor();
-      }
-      const t1 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 800);
-      const t2 = setTimeout(() => window.dsaTutor?.resetEditor?.(), 2000);
-
       const lockPulse = setInterval(() => {
         if (window.dsaTutor?.setEditorReadOnly) {
           window.dsaTutor.setEditorReadOnly(true);
         }
-      }, 500);
+      }, 1000);
       return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
         clearInterval(lockPulse);
       };
     } else if (isMockMode && mockApproachSubmitted) {
@@ -1146,7 +1143,14 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+              <button
+                className="coach-btn"
+                style={{ padding: '6px 14px', fontSize: '11px', background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
+                onClick={submitBadgeTest}
+              >
+                Submit Test
+              </button>
               <button className="abandon-btn" onClick={abandonBadgeTest}>
                 Abandon Test
               </button>
@@ -1892,10 +1896,15 @@ export default function App() {
                               {rev.difficulty}
                             </span>
                           </div>
-                          <div className="review-meta">
+                          <div className="review-meta" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <span className={`review-badge stage-${rev.stage}`}>
                               Review {rev.stage} ({rev.stage === 1 ? '3d' : rev.stage === 2 ? '7d' : '14d'})
                             </span>
+                            {rev.due_date && (
+                              <span style={{ fontSize: '10px', color: '#a1a1aa' }}>
+                                📅 Due: {new Date(rev.due_date).toLocaleDateString()}
+                              </span>
+                            )}
                           </div>
                           {revTopics.length > 0 && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>

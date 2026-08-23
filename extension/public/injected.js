@@ -167,7 +167,9 @@ const injectLockCSS = (isLocked) => {
         a[href*="/solutions"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"],
         a[href$="/submissions"], a[href$="/submissions/"],
         div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"], [data-track-load*="comment"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"], [data-track-load*="comment"], [data-track-load*="hint"],
+        [data-key*="solution"], [data-key*="editorial"], [data-key*="hint"],
+        div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
         section[class*="discussion"], section[class*="comment"], section[class*="community"],
         [id*="discussion"], [id*="discussions"], [id*="comment"], [id*="comments"] {
@@ -346,12 +348,13 @@ document.addEventListener("click", (e) => {
   const isForbidden = (
     text === "editorial" || text === "solutions" || text === "solution" || text === "discussion" || text === "discussions" ||
     text === "submissions" || text === "submission" || text === "my submissions" || text === "comments" || text === "comment" || text === "community" ||
+    text.startsWith("hint") || text.includes("hint 1") || text.includes("hint 2") || text.includes("hint 3") ||
     text.includes("official solution") || text.includes("community solutions") || text.startsWith("discussion (") || text.startsWith("discussions (") || text.startsWith("comments (") ||
     href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/discussions") || href.includes("/submissions") || href.includes("/comments") || href.includes("/community") ||
-    dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("discussions") || dataPath.includes("submissions") || dataPath.includes("community") ||
-    idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("discussions") || idStr.includes("submissions") || idStr.includes("comment") ||
-    ariaLabel.includes("discussion") || ariaLabel.includes("solution") || ariaLabel.includes("editorial") || ariaLabel.includes("submission") || ariaLabel.includes("comment") ||
-    classStr.includes("discussion") || classStr.includes("comment")
+    dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("discussions") || dataPath.includes("submissions") || dataPath.includes("community") || dataPath.includes("hint") ||
+    idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("discussions") || idStr.includes("submissions") || idStr.includes("comment") || idStr.includes("hint") ||
+    ariaLabel.includes("discussion") || ariaLabel.includes("solution") || ariaLabel.includes("editorial") || ariaLabel.includes("submission") || ariaLabel.includes("comment") || ariaLabel.includes("hint") ||
+    classStr.includes("discussion") || classStr.includes("comment") || (classStr.includes("hint") && !classStr.includes("dsa-tutor"))
   );
 
   if (isForbidden) {

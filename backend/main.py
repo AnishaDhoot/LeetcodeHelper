@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "50"))
+AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "500"))
 
 def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -548,14 +548,40 @@ def record_success(problem_id: str, topic: str, time_taken_seconds: Optional[int
     return {"status": "success", "message": "Success logged and mastery updated."}
 
 
+STANDARD_DSA_TOPICS = [
+    "Arrays", "Strings", "Hash Table", "Dynamic Programming",
+    "Trees", "Graphs", "Binary Search", "Two Pointers",
+    "Stack", "Queue", "Heap / Priority Queue", "Sliding Window",
+    "Greedy", "Backtracking", "Linked List", "Bit Manipulation"
+]
+
 @app.get("/topics/mastery", response_model=List[TopicMasterySchema])
 def get_mastery(db: Session = Depends(get_db)):
     """
-    Returns the current mastery data for all topics.
+    Returns the current mastery data for all topics, ensuring all standard DSA topics are present.
     """
-    masteries = db.query(TopicMastery).all()
+    masteries = {m.topic: m for m in db.query(TopicMastery).all()}
+    
+    # Auto-seed any missing standard topics
+    newly_added = False
+    for topic_name in STANDARD_DSA_TOPICS:
+        if topic_name not in masteries:
+            new_m = TopicMastery(
+                topic=topic_name,
+                level=0,
+                rating=1200.0,
+                attempts_count=0,
+                success_count=0
+            )
+            db.add(new_m)
+            masteries[topic_name] = new_m
+            newly_added = True
+            
+    if newly_added:
+        db.commit()
+
     result = []
-    for m in masteries:
+    for m in masteries.values():
         result.append(TopicMasterySchema(
             topic=m.topic,
             mastery_score=m.mastery_score,
@@ -720,15 +746,47 @@ def abandon_badge_test(db: Session = Depends(get_db)):
     return {"status": "success", "message": "Test abandoned."}
 
 
+@app.post("/badge-test/submit")
+def submit_badge_test(db: Session = Depends(get_db)):
+    test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if not test:
+        raise HTTPException(status_code=404, detail="No active Badge Test found.")
+    
+    test.end_time = get_utc_now()
+    if test.problem1_solved and test.problem2_solved:
+        test.status = "passed"
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == test.topic).first()
+        if mastery:
+            mastery.level = test.level
+            mastery.rating = max(mastery.rating, 800.0 + test.level * 240.0)
+        message = f"Badge Test passed! Congratulations, you earned the Level {test.level} Badge for {test.topic}."
+        passed = True
+    else:
+        test.status = "failed"
+        message = "Badge Test submitted. Both problems must be solved correctly to earn the badge."
+        passed = False
+    
+    db.commit()
+    return {
+        "status": "success",
+        "test_status": test.status,
+        "passed": passed,
+        "message": message,
+        "problem1_solved": test.problem1_solved,
+        "problem2_solved": test.problem2_solved
+    }
+
+
 @app.get("/problems/next", response_model=ProblemRecommendResponse)
-def get_recommendation(db: Session = Depends(get_db)):
+def get_recommendation(company: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Returns recommended problems (at least 3) and spaced repetition reviews.
     If a focus topic is saved in UserConfig, recommendations prioritize that topic.
+    If a company is provided, recommendations prioritize that company.
     """
     cfg = db.query(UserConfig).filter(UserConfig.key == FOCUS_KEY).first()
     focus_topic = cfg.value if cfg else None
-    result = get_next_problem(db, focus_topic=focus_topic)
+    result = get_next_problem(db, focus_topic=focus_topic, company=company)
     return ProblemRecommendResponse(
         recommendations=result["recommendations"],
         reviews=result["reviews"]
@@ -1906,6 +1964,24 @@ def get_weekly_journal(db: Session = Depends(get_db)):
             learning = key_learnings.get(latest_category, "Thoroughly analyze failures and write down the root cause to avoid repeating the mistake.")
             md_lines.append(f"- **💡 Key Learning**: {learning}")
             md_lines.append("")
+
+    # Generate a detailed list of solved problems with date solved
+    accepted_attempts = db.query(Attempt).filter(
+        Attempt.timestamp >= seven_days_ago,
+        Attempt.verdict == "Accepted"
+    ).order_by(Attempt.timestamp.desc()).all()
+
+    if accepted_attempts:
+        md_lines.append("")
+        md_lines.append("## ✅ Solved Problems Journal")
+        md_lines.append("")
+        seen_solved = set()
+        for a in accepted_attempts:
+            if not a.problem or a.problem.id in seen_solved:
+                continue
+            seen_solved.add(a.problem.id)
+            date_str = a.timestamp.strftime("%Y-%m-%d %H:%M")
+            md_lines.append(f"- **[{a.problem.title}]({a.problem.url})** — *Solved on {date_str}* (Difficulty: {a.problem.difficulty} | Topics: {a.problem.topics})")
 
     if example_problems:
         md_lines.extend(["", "## Review Suggested For Problems:", *[f"- {p}" for p in list(example_problems)[:10]]])
