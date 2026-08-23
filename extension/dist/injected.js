@@ -164,15 +164,16 @@ const injectLockCSS = (isLocked) => {
       styleEl = document.createElement("style");
       styleEl.id = "dsa-tutor-fairplay-css";
       styleEl.textContent = `
-        a[href*="/solutions"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"],
+        a[href*="solution"], a[href*="editorial"], a[href*="discussion"], a[href*="discussions"], a[href*="comment"], a[href*="community"],
         a[href$="/submissions"], a[href$="/submissions/"],
-        div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
+        div[data-layout-path*="solution"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="community"],
         [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"], [data-track-load*="comment"], [data-track-load*="hint"],
-        [data-key*="solution"], [data-key*="editorial"], [data-key*="hint"],
+        [data-key*="solution"], [data-key*="editorial"], [data-key*="hint"], [data-key*="discussion"],
+        [aria-label*="solution" i], [aria-label*="editorial" i], [aria-label*="discussion" i], [aria-label*="hint" i],
+        [id*="solution"]:not(#dsa-tutor-root *), [id*="editorial"], [id*="discussion"], [id*="comment"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"],
-        [id*="discussion"], [id*="discussions"], [id*="comment"], [id*="comments"] {
+        section[class*="discussion"], section[class*="comment"], section[class*="community"] {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -196,6 +197,7 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
     const pathname = window.location.pathname.toLowerCase();
     // Allow active submission detail (/submissions/detail/...) so verdict displays cleanly
     const isForbiddenRoute = (
+      pathname.includes("/solution") ||
       pathname.includes("/solutions") ||
       pathname.includes("/editorial") ||
       pathname.includes("/discussion") ||
@@ -219,8 +221,8 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
       );
 
       allElements.forEach(el => {
-        // Do not hide active submission result panel or code editor
-        if (el.closest('[class*="submission-result"], [class*="result-"], [class*="monaco-editor"]')) {
+        // Do not hide active submission result panel or code editor or our extension root
+        if (el.closest('#dsa-tutor-root, [class*="submission-result"], [class*="result-"], [class*="monaco-editor"]')) {
           const classStr = (typeof el.className === "string" ? el.className : "").toLowerCase();
           if (classStr.includes("result") || classStr.includes("accepted") || classStr.includes("wrong") || classStr.includes("runtime")) {
             return;
@@ -234,15 +236,33 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         const classStr = (typeof el.className === "string" ? el.className : "").toLowerCase();
         const ariaLabel = (el.getAttribute("aria-label") || "").toLowerCase();
 
-        // Check tab headers and links
+        // Check tab headers and links with robust substring matching
         const isForbiddenTab = (
-          text === "editorial" || text === "solutions" || text === "solution" || text === "discussion" || text === "discussions" ||
-          text === "submissions" || text === "submitting..." || text === "comments" || text === "comment" || text === "community" ||
-          text.includes("official solution") || text.includes("community solutions") || text.startsWith("discussion (") || text.startsWith("discussions (") || text.startsWith("comments (") ||
-          href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/discussions") || (href.includes("/submissions") && !href.includes("/submissions/detail")) || href.includes("/comments") || href.includes("/community") ||
-          dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("discussions") || dataPath.includes("community") ||
-          (idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("discussions") || idStr.includes("comment")) && !idStr.includes("editor")
-        );
+          text.includes("editorial") ||
+          text.includes("solution") ||
+          text.includes("discussion") ||
+          text.includes("comment") ||
+          text.includes("community") ||
+          text.includes("submissions") ||
+          href.includes("/editorial") ||
+          href.includes("/solution") ||
+          href.includes("/solutions") ||
+          href.includes("/discussion") ||
+          href.includes("/discussions") ||
+          href.includes("/comments") ||
+          href.includes("/community") ||
+          (href.includes("/submissions") && !href.includes("/submissions/detail")) ||
+          dataPath.includes("editorial") ||
+          dataPath.includes("solution") ||
+          dataPath.includes("solutions") ||
+          dataPath.includes("discussion") ||
+          dataPath.includes("discussions") ||
+          dataPath.includes("community") ||
+          ariaLabel.includes("solution") ||
+          ariaLabel.includes("editorial") ||
+          ariaLabel.includes("discussion") ||
+          (idStr.includes("editorial") || idStr.includes("solution") || idStr.includes("discussion") || idStr.includes("comment"))
+        ) && !text.includes("description") && !text.includes("problem") && !text.includes("run") && !text.includes("submit") && !idStr.includes("editor");
 
         // Check if element is a comment / discussion block section
         const isCommentOrDiscussionBlock = (
@@ -265,15 +285,15 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         const descTab = Array.from(document.querySelectorAll('a, button, div, span, [role="tab"]')).find(el => {
           const txt = (el.textContent || "").trim().toLowerCase();
           const href = (el.getAttribute("href") || "").toLowerCase();
-          return txt === "description" || txt === "problem" || href.includes("/description");
+          return (txt.includes("description") || txt.includes("problem") || href.includes("/description")) && !txt.includes("solution") && !txt.includes("editorial");
         });
         if (descTab) {
           descTab.click();
         }
 
-        // Only add overlay to forbidden tab content panel (never to main #qd-content)
+        // Only add overlay to forbidden tab content panel
         const panelContainer = document.querySelector(
-          "div[data-layout-path*='editorial'], div[data-layout-path*='solutions'], div[data-layout-path*='discussion']"
+          "div[data-layout-path*='editorial'], div[data-layout-path*='solution'], div[data-layout-path*='solutions'], div[data-layout-path*='discussion']"
         );
 
         if (panelContainer && !document.getElementById("dsa-tutor-tab-lock-overlay")) {
@@ -346,16 +366,40 @@ document.addEventListener("click", (e) => {
   const classStr = (typeof closestNav.className === "string" ? closestNav.className : "").toLowerCase();
 
   const isForbidden = (
-    text === "editorial" || text === "solutions" || text === "solution" || text === "discussion" || text === "discussions" ||
-    text === "submissions" || text === "submission" || text === "my submissions" || text === "comments" || text === "comment" || text === "community" ||
-    text.startsWith("hint") || text.includes("hint 1") || text.includes("hint 2") || text.includes("hint 3") ||
-    text.includes("official solution") || text.includes("community solutions") || text.startsWith("discussion (") || text.startsWith("discussions (") || text.startsWith("comments (") ||
-    href.includes("/editorial") || href.includes("/solutions") || href.includes("/discussion") || href.includes("/discussions") || href.includes("/submissions") || href.includes("/comments") || href.includes("/community") ||
-    dataPath.includes("editorial") || dataPath.includes("solutions") || dataPath.includes("discussion") || dataPath.includes("discussions") || dataPath.includes("submissions") || dataPath.includes("community") || dataPath.includes("hint") ||
-    idStr.includes("editorial") || idStr.includes("solutions") || idStr.includes("discussion") || idStr.includes("discussions") || idStr.includes("submissions") || idStr.includes("comment") || idStr.includes("hint") ||
-    ariaLabel.includes("discussion") || ariaLabel.includes("solution") || ariaLabel.includes("editorial") || ariaLabel.includes("submission") || ariaLabel.includes("comment") || ariaLabel.includes("hint") ||
-    classStr.includes("discussion") || classStr.includes("comment") || (classStr.includes("hint") && !classStr.includes("dsa-tutor"))
-  );
+    text.includes("editorial") ||
+    text.includes("solution") ||
+    text.includes("discussion") ||
+    text.includes("comment") ||
+    text.includes("community") ||
+    text.includes("hint") ||
+    text.includes("submissions") ||
+    href.includes("/editorial") ||
+    href.includes("/solution") ||
+    href.includes("/solutions") ||
+    href.includes("/discussion") ||
+    href.includes("/discussions") ||
+    href.includes("/comments") ||
+    href.includes("/community") ||
+    (href.includes("/submissions") && !href.includes("/submissions/detail")) ||
+    dataPath.includes("editorial") ||
+    dataPath.includes("solution") ||
+    dataPath.includes("solutions") ||
+    dataPath.includes("discussion") ||
+    dataPath.includes("discussions") ||
+    dataPath.includes("submissions") ||
+    ariaLabel.includes("solution") ||
+    ariaLabel.includes("editorial") ||
+    ariaLabel.includes("discussion") ||
+    ariaLabel.includes("hint") ||
+    ariaLabel.includes("submission") ||
+    idStr.includes("editorial") ||
+    idStr.includes("solution") ||
+    idStr.includes("discussion") ||
+    idStr.includes("hint") ||
+    classStr.includes("discussion") ||
+    classStr.includes("comment") ||
+    (classStr.includes("hint") && !classStr.includes("dsa-tutor"))
+  ) && !text.includes("description") && !text.includes("problem") && !text.includes("run") && !text.includes("submit") && !idStr.includes("editor");
 
   if (isForbidden) {
     e.preventDefault();
