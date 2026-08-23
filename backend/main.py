@@ -920,6 +920,10 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
         sr.problem_id: sr for sr in db.query(SpacedRepetition).filter(SpacedRepetition.problem_id.in_(prob_ids)).all()
     } if prob_ids else {}
 
+    existing_attempts = {
+        a[0] for a in db.query(Attempt.problem_id).filter(Attempt.problem_id.in_(prob_ids), Attempt.verdict == "Accepted").all()
+    } if prob_ids else set()
+
     now_utc = get_utc_now()
     due_utc = now_utc + timedelta(days=3)
 
@@ -950,6 +954,18 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             )
             db.add(problem)
 
+        # Record accepted attempt if not already present
+        if prob.problem_id not in existing_attempts:
+            att = Attempt(
+                problem_id=prob.problem_id,
+                verdict="Accepted",
+                root_cause_category="none",
+                explanation_text="Synced from LeetCode solved history.",
+                timestamp=now_utc
+            )
+            db.add(att)
+            existing_attempts.add(prob.problem_id)
+
         # Seed initial spaced repetition schedule for solved problem (due in 3 days)
         if prob.problem_id not in existing_srs:
             sr = SpacedRepetition(
@@ -976,15 +992,18 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
                 topic=topic,
                 rating=800.0,
                 attempts_count=solved_count,
-                success_count=0,
+                success_count=solved_count,
                 level=0
             )
             db.add(mastery)
             new_topics += 1
             seeded_topics += 1
-        elif solved_count > mastery.attempts_count:
-            mastery.attempts_count = solved_count
-            seeded_topics += 1
+        else:
+            if solved_count > mastery.attempts_count:
+                mastery.attempts_count = solved_count
+                seeded_topics += 1
+            if solved_count > mastery.success_count:
+                mastery.success_count = solved_count
 
     db.commit()
     synced = len(req.problems)
