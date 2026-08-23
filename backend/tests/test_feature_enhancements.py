@@ -83,9 +83,9 @@ def test_weekly_journal_includes_solved_dates():
     assert "Two Sum" in md
     assert "Solved on" in md
 
-def test_ai_quota_default_is_500():
-    """Verifies default AI daily quota limit is set to 500."""
-    assert AI_DAILY_QUOTA_LIMIT == 500
+def test_ai_quota_default_is_50():
+    """Verifies default AI daily quota limit is set to 50."""
+    assert AI_DAILY_QUOTA_LIMIT == 50
     res = client.get("/ai/quota")
     assert res.status_code == 200
-    assert res.json()["limit"] == 500
+    assert res.json()["limit"] == 50

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "500"))
+AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "50"))
 
 def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
