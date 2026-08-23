@@ -68,6 +68,19 @@ export default function App() {
         setActiveTest(res.data);
         setTestTimerSeconds(res.data.time_limit_seconds || 5400);
         setActiveTab('test');
+        if (window.dsaTutor?.setAssessmentLocked) {
+          window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
+        }
+        if (window.dsaTutor?.resetEditor) {
+          setTimeout(() => window.dsaTutor.resetEditor(), 500);
+        }
+        if (res.data.problem1?.url) {
+          const urlMatch = window.location.href.match(/problems\/([^/]+)/);
+          const currentSlug = urlMatch ? urlMatch[1] : '';
+          if (currentSlug !== res.data.problem1.id) {
+            window.location.href = res.data.problem1.url;
+          }
+        }
       } else {
         alert(res?.error || 'Failed to start Badge Test.');
       }
@@ -507,23 +520,20 @@ export default function App() {
     setCoachLoading('hint');
     try {
       const ctx = await gatherContext(true);
-      const nextLevel = currentHintLevel + 1;
+      const nextLevel = Math.min(3, Math.max(1, (currentHintLevel || 0) + 1));
       const payload = { ...ctx, level: nextLevel };
       
       chrome.runtime.sendMessage({ action: 'reveal_hint', payload }, (response) => {
         setCoachLoading(null);
         fetchAiQuota();
         if (response && response.success) {
-          const newHint = { level: response.data.level, hint: response.data.hint };
-          setHintsList(prev => {
-            const exists = prev.some(h => h.level === newHint.level);
-            if (exists) return prev;
-            return [...prev, newHint];
-          });
-          setCurrentHintLevel(response.data.level);
+          const returnedLevel = response.data.level || nextLevel;
+          const newHint = { level: returnedLevel, hint: response.data.hint };
+          setHintsList(prev => [...prev.filter(h => h.level !== returnedLevel), newHint].sort((a, b) => a.level - b.level));
+          setCurrentHintLevel(returnedLevel);
           setCoachFilter('hints');
           if (window.dsaTutor) {
-            window.dsaTutor.hintsUsed = response.data.level;
+            window.dsaTutor.hintsUsed = returnedLevel;
           }
           setIsOpen(true);
           setActiveTab('coach');

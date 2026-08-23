@@ -101,13 +101,13 @@ const injectLockCSS = (isLocked) => {
       styleEl = document.createElement("style");
       styleEl.id = "dsa-tutor-fairplay-css";
       styleEl.textContent = `
-        a[href*="/solution"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"],
-        div[data-layout-path*="solution"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="community"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"],
-        [data-key*="solution"], [data-key*="editorial"], [data-key*="discussion"],
+        a[href*="/solution"], a[href*="/editorial"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"],
+        div[data-layout-path*="solution"], div[data-layout-path*="editorial"], div[data-layout-path*="discussion"], div[data-layout-path*="community"], div[data-layout-path*="submissions"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="editorial"], [data-track-load*="submissions"],
+        [data-key*="solution"], [data-key*="editorial"], [data-key*="discussion"], [data-key*="submissions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"] {
+        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"] {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -134,7 +134,8 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
       window.location.href.includes("/solution") ||
       window.location.href.includes("/editorial") ||
       window.location.href.includes("/discussion") ||
-      window.location.href.includes("/community")
+      window.location.href.includes("/community") ||
+      window.location.href.includes("/submissions")
     );
 
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
@@ -154,11 +155,11 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         const classStr = (typeof el.className === "string" ? el.className : "").toLowerCase();
 
         const isForbiddenTab = (
-          (href.includes("/solution") || href.includes("/editorial") || href.includes("/discussion") || href.includes("/community")) ||
+          (href.includes("/solution") || href.includes("/editorial") || href.includes("/discussion") || href.includes("/community") || href.includes("/submissions")) ||
           (dataPath.includes("solution") || dataPath.includes("editorial") || dataPath.includes("discussion") || dataPath.includes("submissions")) ||
-          (el.getAttribute("role") === "tab" && (text.includes("editorial") || text.includes("solution") || text.includes("discussion") || text.includes("community") || text.includes("submissions"))) ||
-          (ariaLabel.includes("editorial") || (ariaLabel.includes("solution") && !ariaLabel.includes("submit")) || ariaLabel.includes("discussion")) ||
-          (idStr.includes("editorial") || idStr.includes("discussion"))
+          (el.getAttribute("role") === "tab" && (text.includes("editorial") || text.includes("solution") || text.includes("discussion") || text.includes("community") || text.includes("submission"))) ||
+          (ariaLabel.includes("editorial") || (ariaLabel.includes("solution") && !ariaLabel.includes("submit")) || ariaLabel.includes("discussion") || ariaLabel.includes("submission")) ||
+          (idStr.includes("editorial") || idStr.includes("discussion") || idStr.includes("submission"))
         );
 
         if (isForbiddenTab) {
@@ -170,12 +171,12 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         }
       });
 
-      // If user is currently on an Editorial/Solutions/Discussion URL route:
+      // If user is currently on an Editorial/Solutions/Discussion/Submissions URL route:
       if (isForbiddenRoute) {
         const descTab = Array.from(document.querySelectorAll('a, button, [role="tab"]')).find(el => {
           const txt = (el.textContent || "").trim().toLowerCase();
           const href = (el.getAttribute("href") || "").toLowerCase();
-          return (txt.includes("description") || txt.includes("problem") || href.includes("/description")) && !txt.includes("solution") && !txt.includes("editorial");
+          return (txt.includes("description") || txt.includes("problem") || href.includes("/description")) && !txt.includes("solution") && !txt.includes("editorial") && !txt.includes("submission");
         });
         if (descTab) {
           descTab.click();
@@ -388,3 +389,10 @@ setInterval(() => {
     applyReadOnlyState(true);
   }
 }, 400);
+
+// Continuously enforce assessment locking while assessment is active
+setInterval(() => {
+  if (window.__dsaTutorAssessmentLocked) {
+    applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
+  }
+}, 300);

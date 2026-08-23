@@ -2783,12 +2783,47 @@ def seed_db():
                     if q_data.get('is_premium'):
                         problems_dict[q_slug]["is_premium"] = True
                 else:
+                    def infer_topic(slug, title):
+                        text = (slug + " " + title).lower()
+                        if any(w in text for w in ["tree", "bst", "trie", "inorder", "preorder", "postorder", "subtree", "ancestor", "path sum"]):
+                            return "Trees"
+                        if any(w in text for w in ["graph", "island", "course-schedule", "network", "clone-graph", "alien", "dijkstra", "bipartite", "cheapest-flight", "swim", "ladder", "provinces", "rotting", "surrounded"]):
+                            return "Graphs"
+                        if any(w in text for w in ["dynamic-programming", "coin-change", "climbing-stairs", "house-robber", "longest-increasing", "knapsack", "edit-distance", "decode-ways", "partition", "target-sum", "jump-game", "unique-paths", "maximal", "interleaving", "fibonacci", "longest-common", "regex", "burst", "stock", "word-break"]):
+                            return "Dynamic Programming"
+                        if any(w in text for w in ["backtrack", "n-queens", "sudoku", "permutation", "combination", "subset", "generate-parentheses", "word-search", "palindrome-partitioning", "letter-combinations"]):
+                            return "Backtracking"
+                        if any(w in text for w in ["linked-list", "reverse-list", "merge-two-sorted-lists", "remove-nth", "reorder-list", "copy-list", "add-two-numbers", "lru", "lfu", "middle-of-the-linked-list", "delete-node", "swap-nodes", "flatten", "intersection-of-two-linked-lists", "rotate-list"]):
+                            return "Linked List"
+                        if any(w in text for w in ["stack", "parentheses", "evaluate-reverse", "daily-temperatures", "car-fleet", "largest-rectangle", "min-stack", "asteroid", "decode-string", "next-greater"]):
+                            return "Stack"
+                        if any(w in text for w in ["binary-search", "search-in-rotated", "find-minimum-in-rotated", "search-a-2d", "koko-eating", "time-based", "median-of-two", "first-bad", "peak", "capacity-to-ship"]):
+                            return "Binary Search"
+                        if any(w in text for w in ["sliding-window", "minimum-window", "longest-substring", "permutation-in-string", "sliding-window-maximum", "longest-repeating", "fruit-into-baskets", "max-consecutive"]):
+                            return "Sliding Window"
+                        if any(w in text for w in ["heap", "priority-queue", "kth-largest", "top-k", "merge-k-sorted", "find-median-from-data", "task-scheduler", "k-closest", "reorganize-string"]):
+                            return "Heap / Priority Queue"
+                        if any(w in text for w in ["two-pointers", "3sum", "container-with-most-water", "trapping-rain-water", "valid-palindrome", "two-sum-ii", "remove-duplicates", "move-zeroes", "sort-colors", "4sum"]):
+                            return "Two Pointers"
+                        if any(w in text for w in ["intervals", "merge-intervals", "insert-interval", "non-overlapping", "meeting-rooms", "erase-overlap", "interval-list"]):
+                            return "Intervals"
+                        if any(w in text for w in ["greedy", "gas-station", "hand-of-straights", "partition-labels", "valid-parenthesis-string", "candy", "lemonade", "assign-cookies"]):
+                            return "Greedy"
+                        if any(w in text for w in ["bit", "single-number", "number-of-1-bits", "counting-bits", "reverse-bits", "missing-number", "sum-of-two-integers", "bitwise", "xor"]):
+                            return "Bit Manipulation"
+                        if any(w in text for w in ["math", "geometry", "rotate-image", "spiral-matrix", "set-matrix-zeroes", "happy-number", "plus-one", "pow", "multiply-strings", "detect-squares"]):
+                            return "Math & Geometry"
+                        if any(w in text for w in ["string", "anagram", "palindrome", "roman", "integer-to-roman", "zigzag", "group-anagrams"]):
+                            return "Strings"
+                        return "Arrays"
+
+                    inferred = infer_topic(q_slug, q_data['title'])
                     problems_dict[q_slug] = {
                         "id": q_slug,
                         "title": q_data['title'],
                         "url": q_data['url'],
                         "difficulty": q_data['difficulty'],
-                        "topics": {"Company Practice"},
+                        "topics": {inferred},
                         "companies": {comp_name},
                         "is_premium": q_data.get('is_premium', False)
                     }

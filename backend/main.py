@@ -878,8 +878,8 @@ def reveal_hint(req: HintRevealRequest, db: Session = Depends(get_db)):
     )
     return HintRevealResponse(
         hint=result.get("hint", ""),
-        level=result.get("level", req.level),
-        has_next=result.get("has_next", req.level < 3)
+        level=req.level or 1,
+        has_next=(req.level or 1) < 3
     )
 
 
