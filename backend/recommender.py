@@ -14,13 +14,112 @@ from sqlalchemy import desc
 from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition
 
 # ---------------------------------------------------------------------------
+# Canonical Topic Map & Normalization Helper
+# ---------------------------------------------------------------------------
+CANONICAL_TOPIC_MAP = {
+    # Arrays
+    "array": "Arrays",
+    "arrays": "Arrays",
+    "arrays & hashing": "Arrays",
+    "matrix": "Arrays",
+    "sorting": "Arrays",
+
+    # Strings
+    "string": "Strings",
+    "strings": "Strings",
+    "string matching": "Strings",
+
+    # Sliding Window & Two Pointers
+    "two pointers": "Sliding Window & Two Pointers",
+    "sliding window": "Sliding Window & Two Pointers",
+    "sliding window & two pointers": "Sliding Window & Two Pointers",
+
+    # Binary Search
+    "binary search": "Binary Search",
+
+    # Linked List
+    "linked list": "Linked List",
+    "linked lists": "Linked List",
+    "doubly-linked list": "Linked List",
+
+    # Stack & Queue
+    "stack": "Stack & Queue",
+    "stacks": "Stack & Queue",
+    "queue": "Stack & Queue",
+    "queues": "Stack & Queue",
+    "monotonic stack": "Stack & Queue",
+    "monotonic queue": "Stack & Queue",
+    "stack & queue": "Stack & Queue",
+
+    # Hashing
+    "hash table": "Hashing",
+    "hash function": "Hashing",
+    "hashing": "Hashing",
+    "hashmap": "Hashing",
+
+    # Recursion & Backtracking
+    "recursion": "Recursion & Backtracking",
+    "backtracking": "Recursion & Backtracking",
+    "recursion & backtracking": "Recursion & Backtracking",
+
+    # Trees & BST
+    "tree": "Trees & BST",
+    "trees": "Trees & BST",
+    "trees & bst": "Trees & BST",
+    "binary tree": "Trees & BST",
+    "binary search tree": "Trees & BST",
+
+    # Heaps / Priority Queue
+    "heap (priority queue)": "Heaps / Priority Queue",
+    "heap": "Heaps / Priority Queue",
+    "heaps": "Heaps / Priority Queue",
+    "priority queue": "Heaps / Priority Queue",
+    "heaps / priority queue": "Heaps / Priority Queue",
+
+    # Graphs
+    "graph": "Graphs",
+    "graphs": "Graphs",
+    "depth-first search": "Graphs",
+    "breadth-first search": "Graphs",
+    "union find": "Graphs",
+    "topological sort": "Graphs",
+    "shortest path": "Graphs",
+    "minimum spanning tree": "Graphs",
+
+    # Dynamic Programming
+    "dynamic programming": "Dynamic Programming",
+    "dp": "Dynamic Programming",
+    "memoization": "Dynamic Programming",
+
+    # Greedy
+    "greedy": "Greedy",
+
+    # Trie & Bit Manipulation
+    "trie": "Trie & Bit Manipulation",
+    "bit manipulation": "Trie & Bit Manipulation",
+    "bitmask": "Trie & Bit Manipulation",
+    "trie & bit manipulation": "Trie & Bit Manipulation",
+}
+
+def normalize_topic(topic_str: str) -> str:
+    """Maps raw LeetCode or scraped tags into one of the 14 standard DSA categories."""
+    if not topic_str:
+        return "Arrays"
+    clean = topic_str.strip().lower()
+    return CANONICAL_TOPIC_MAP.get(clean, topic_str.strip())
+
+
+# ---------------------------------------------------------------------------
 # Topic Tag Isolation Helper
 # ---------------------------------------------------------------------------
 EXCLUDED_TAGS_FOR_TOPIC = {
+    "Arrays": ["tree", "graph", "depth-first search", "breadth-first search", "trie", "dynamic programming", "backtracking", "union-find"],
     "Arrays & Hashing": ["tree", "graph", "depth-first search", "breadth-first search", "trie", "dynamic programming", "backtracking", "union-find"],
     "Two Pointers": ["tree", "graph", "trie"],
     "Sliding Window": ["tree", "graph", "trie"],
+    "Sliding Window & Two Pointers": ["tree", "graph", "trie"],
     "Stack": ["tree", "graph"],
+    "Stack & Queue": ["tree", "graph"],
     "Binary Search": ["tree", "graph"],
     "Linked List": ["tree", "graph"],
     "Trees & BST": ["graph"],
@@ -77,10 +176,11 @@ def update_mastery_on_submission(
     Updates TopicMastery attempt/success metrics and reschedules spaced-repetition
     review dates. Badge levels advance exclusively via Badge Tests.
     """
-    mastery = db.query(TopicMastery).filter(TopicMastery.topic == topic_name).first()
+    canonical_name = normalize_topic(topic_name)
+    mastery = db.query(TopicMastery).filter(TopicMastery.topic == canonical_name).first()
     if not mastery:
         mastery = TopicMastery(
-            topic=topic_name,
+            topic=canonical_name,
             rating=1200.0,
             attempts_count=0,
             success_count=0,

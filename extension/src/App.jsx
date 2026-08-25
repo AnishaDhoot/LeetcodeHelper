@@ -56,6 +56,17 @@ export default function App() {
         const elapsed = res.data.elapsed_seconds || 0;
         const remaining = timeLimit - elapsed;
         setTestTimerSeconds(remaining > 0 ? remaining : 0);
+        if (window.dsaTutor?.setAssessmentLocked) {
+          window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
+        }
+        if (window.dsaTutor?.resetEditor) {
+          window.dsaTutor.resetEditor();
+          [200, 600, 1200, 2200].forEach(d => {
+            setTimeout(() => {
+              if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+            }, d);
+          });
+        }
       } else {
         setActiveTest(null);
       }
@@ -63,32 +74,55 @@ export default function App() {
   };
 
   const startBadgeTest = (topic) => {
-    chrome.runtime.sendMessage({ action: 'start_badge_test', payload: { topic } }, (res) => {
-      if (res && res.success && res.data) {
-        setActiveTest(res.data);
-        setTestTimerSeconds(res.data.time_limit_seconds || 5400);
-        setActiveTab('test');
-        if (window.dsaTutor?.setAssessmentLocked) {
-          window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
-        }
-        if (window.dsaTutor?.resetEditor) {
-          [200, 600, 1200, 2200].forEach(d => {
-            setTimeout(() => {
-              if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
-            }, d);
-          });
-        }
-        if (res.data.problem1?.url) {
-          const urlMatch = window.location.href.match(/problems\/([^/]+)/);
-          const currentSlug = urlMatch ? urlMatch[1] : '';
-          if (currentSlug !== res.data.problem1.id) {
-            window.location.href = res.data.problem1.url;
+    const doStart = () => {
+      chrome.runtime.sendMessage({ action: 'start_badge_test', payload: { topic } }, (res) => {
+        if (res && res.success && res.data) {
+          setActiveTest(res.data);
+          setTestTimerSeconds(res.data.time_limit_seconds || 5400);
+          setActiveTab('test');
+          if (window.dsaTutor?.setAssessmentLocked) {
+            window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
           }
+          if (window.dsaTutor?.resetEditor) {
+            window.dsaTutor.resetEditor();
+            [200, 600, 1200, 2200].forEach(d => {
+              setTimeout(() => {
+                if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+              }, d);
+            });
+          }
+          if (res.data.problem1?.url) {
+            const urlMatch = window.location.href.match(/problems\/([^/]+)/);
+            const currentSlug = urlMatch ? urlMatch[1] : '';
+            if (currentSlug !== res.data.problem1.id) {
+              window.location.href = res.data.problem1.url;
+            }
+          }
+        } else if (res?.error && res.error.includes('Mock Interview is active')) {
+          if (window.confirm('A previous Mock Interview session is still open. Would you like to end the mock interview and start your Badge Test now?')) {
+            chrome.runtime.sendMessage({ action: 'mock_abandon' }, () => {
+              setIsMockMode(false);
+              setMockSession(null);
+              startBadgeTest(topic);
+            });
+          }
+        } else {
+          alert(res?.error || 'Failed to start Badge Test.');
         }
-      } else {
-        alert(res?.error || 'Failed to start Badge Test.');
+      });
+    };
+
+    if (isMockMode) {
+      if (window.confirm('A Mock Interview is currently open. End the mock interview to start this Badge Test?')) {
+        chrome.runtime.sendMessage({ action: 'mock_abandon' }, () => {
+          setIsMockMode(false);
+          setMockSession(null);
+          doStart();
+        });
       }
-    });
+    } else {
+      doStart();
+    }
   };
 
   const [showBadgeSubmitConfirm, setShowBadgeSubmitConfirm] = useState(false);
@@ -130,7 +164,7 @@ export default function App() {
 
   const fetchActiveMock = () => {
     chrome.runtime.sendMessage({ action: 'get_active_mock' }, (res) => {
-      if (res && res.success && res.data) {
+      if (res && res.success && res.data && res.data.session_id) {
         setMockSession(res.data);
         setMockApproachSubmitted(res.data.approach_submitted);
         const remaining = res.data.time_limit_seconds - res.data.elapsed_seconds;
@@ -159,6 +193,9 @@ export default function App() {
             }
           }, 800);
         }
+      } else {
+        setMockSession(null);
+        setIsMockMode(false);
       }
     });
   };
@@ -1098,7 +1135,7 @@ export default function App() {
           </span>
           CodeCoach
           <span style={{ fontSize: '11px', background: '#27272a', padding: '2px 6px', borderRadius: '10px', color: '#f59e0b', fontWeight: '500' }}>
-            🔥 {streakData.current_streak_days}d
+            🔥 {streakData?.current_streak_days || 0}d
           </span>
         </h3>
 
@@ -1185,22 +1222,6 @@ export default function App() {
                 Mastery
               </button>
               <button
-                className={`tab-btn ${activeTab === 'solved' ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveTab('solved');
-                  fetchSolvedProblems();
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                  <polyline points="10 9 9 9 8 9"/>
-                </svg>
-                Solved
-              </button>
-              <button
                 className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
                 onClick={() => setActiveTab('history')}
               >
@@ -1241,6 +1262,9 @@ export default function App() {
                     target="_self"
                     onClick={(e) => {
                       e.preventDefault();
+                      if (window.dsaTutor?.resetEditor) {
+                        window.dsaTutor.resetEditor();
+                      }
                       window.location.href = activeTest.problem1.url;
                     }}
                     className="badge-quest-link"
@@ -1268,6 +1292,9 @@ export default function App() {
                     target="_self"
                     onClick={(e) => {
                       e.preventDefault();
+                      if (window.dsaTutor?.resetEditor) {
+                        window.dsaTutor.resetEditor();
+                      }
                       window.location.href = activeTest.problem2.url;
                     }}
                     className="badge-quest-link"
@@ -2150,262 +2177,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB: SOLVED PROBLEMS SPREADSHEET & TRACKER */}
-        {!activeTest && !isMockMode && activeTab === 'solved' && (
-          <div className="solved-tracker-container">
-            {/* Top Highlighted Summary Banner */}
-            <div className="solved-header-hero">
-              <div className="solved-hero-top">
-                <div>
-                  <h4 className="solved-hero-title">
-                    <span className="solved-hero-icon">📊</span> Solved Problems Spreadsheet
-                  </h4>
-                  <div className="solved-hero-subtitle">
-                    Account: <strong style={{ color: '#60a5fa' }}>{syncedAccount.username || 'LeetCode User'}</strong> • {solvedProblems.length} Solved Questions Synced & Stored
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <button
-                    className="coach-btn secondary"
-                    style={{ padding: '5px 10px', fontSize: '11px', borderRadius: '6px' }}
-                    onClick={openWeeklyDigest}
-                    title="View Weekly AI Digest & Insights"
-                  >
-                    ✨ AI Weekly Log
-                  </button>
-                  <button
-                    className="coach-btn"
-                    style={{ padding: '5px 10px', fontSize: '11px', borderRadius: '6px' }}
-                    onClick={exportSolvedCsv}
-                    disabled={exportingCsv}
-                    title="Export CSV spreadsheet"
-                  >
-                    📥 {exportingCsv ? 'Exporting…' : 'Export CSV'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Metric Badges */}
-              <div className="solved-hero-metrics">
-                <div className="metric-pill">
-                  <span className="metric-label">Total Solved</span>
-                  <span className="metric-val">{solvedProblems.length}</span>
-                </div>
-                <div className="metric-pill">
-                  <span className="metric-label" style={{ color: '#4ade80' }}>Easy</span>
-                  <span className="metric-val" style={{ color: '#4ade80' }}>
-                    {solvedProblems.filter(p => p.difficulty?.toLowerCase() === 'easy').length}
-                  </span>
-                </div>
-                <div className="metric-pill">
-                  <span className="metric-label" style={{ color: '#fbbf24' }}>Medium</span>
-                  <span className="metric-val" style={{ color: '#fbbf24' }}>
-                    {solvedProblems.filter(p => p.difficulty?.toLowerCase() === 'medium').length}
-                  </span>
-                </div>
-                <div className="metric-pill">
-                  <span className="metric-label" style={{ color: '#f87171' }}>Hard</span>
-                  <span className="metric-val" style={{ color: '#f87171' }}>
-                    {solvedProblems.filter(p => p.difficulty?.toLowerCase() === 'hard').length}
-                  </span>
-                </div>
-                <div className="metric-pill">
-                  <span className="metric-label" style={{ color: '#a78bfa' }}>Reviews Due</span>
-                  <span className="metric-val" style={{ color: '#a78bfa' }}>
-                    {solvedProblems.filter(p => p.review_status?.toLowerCase().includes('today') || p.review_status?.toLowerCase().includes('due')).length}
-                  </span>
-                </div>
-              </div>
-
-              {/* Filters Row */}
-              <div className="solved-filters-row">
-                <div style={{ flex: 2, position: 'relative' }}>
-                  <input
-                    type="text"
-                    className="solved-search-input"
-                    placeholder="🔍 Search problems by title or slug..."
-                    value={solvedSearch}
-                    onChange={(e) => setSolvedSearch(e.target.value)}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <select
-                    className="solved-select-filter"
-                    value={solvedDifficultyFilter}
-                    onChange={(e) => setSolvedDifficultyFilter(e.target.value)}
-                  >
-                    <option value="ALL">All Difficulties</option>
-                    <option value="Easy">Easy</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Hard">Hard</option>
-                  </select>
-                </div>
-                <div style={{ flex: 1.2 }}>
-                  <select
-                    className="solved-select-filter"
-                    value={solvedTopicFilter}
-                    onChange={(e) => setSolvedTopicFilter(e.target.value)}
-                  >
-                    <option value="ALL">All Topics</option>
-                    {Array.from(new Set(solvedProblems.flatMap(p => (p.topics || '').split(',').map(t => t.trim()).filter(Boolean)))).sort().map(topic => (
-                      <option key={topic} value={topic}>{topic}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Table Content */}
-            {loadingSolved ? (
-              <div className="loading-container">
-                <div className="spinner" />
-                <p style={{ margin: 0, fontSize: '12px', color: '#71717a' }}>Loading solved problems table…</p>
-              </div>
-            ) : (
-              (() => {
-                const filtered = solvedProblems.filter(p => {
-                  const matchesSearch = !solvedSearch.trim() || 
-                    p.title.toLowerCase().includes(solvedSearch.toLowerCase()) || 
-                    p.problem_id.toLowerCase().includes(solvedSearch.toLowerCase());
-                  const matchesDiff = solvedDifficultyFilter === 'ALL' || p.difficulty.toLowerCase() === solvedDifficultyFilter.toLowerCase();
-                  const matchesTopic = solvedTopicFilter === 'ALL' || (p.topics && p.topics.includes(solvedTopicFilter));
-                  return matchesSearch && matchesDiff && matchesTopic;
-                });
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="empty-state" style={{ padding: '24px 12px' }}>
-                      {solvedProblems.length === 0 ? (
-                        <>
-                          <div style={{ fontSize: '24px', marginBottom: '8px' }}>📂</div>
-                          <div>No solved problems found in database.</div>
-                          <button
-                            className="coach-btn"
-                            style={{ marginTop: '12px', width: 'auto', padding: '6px 14px' }}
-                            onClick={() => {
-                              setActiveTab('history');
-                              runHistorySync();
-                            }}
-                          >
-                            🔄 Sync LeetCode History Now
-                          </button>
-                        </>
-                      ) : (
-                        'No problems match your current search/filter.'
-                      )}
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="solved-table-wrapper">
-                    <table className="solved-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: '38%' }}>Problem & Topics</th>
-                          <th style={{ width: '12%' }}>Diff</th>
-                          <th style={{ width: '14%' }}>Date Solved</th>
-                          <th style={{ width: '14%' }}>Review Due</th>
-                          <th style={{ width: '22%' }}>My Notes & Rating</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map((prob, idx) => {
-                          const topicsList = prob.topics ? prob.topics.split(',').map(t => t.trim()).filter(Boolean) : [];
-                          const isSaving = inlineSaveStatus[prob.problem_id];
-                          return (
-                            <tr key={prob.problem_id}>
-                              <td>
-                                <div className="prob-title-cell">
-                                  <span className="prob-idx">#{idx + 1}</span>
-                                  <a
-                                    href={prob.url}
-                                    target="_self"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      window.location.href = prob.url;
-                                    }}
-                                    className="prob-link"
-                                    title={`Open ${prob.title} on LeetCode`}
-                                  >
-                                    {prob.title}
-                                  </a>
-                                </div>
-                                <div className="prob-tags-cell">
-                                  {prob.companies && (
-                                    <span className="prob-company-chip">🏢 {prob.companies}</span>
-                                  )}
-                                  {topicsList.slice(0, 2).map(t => (
-                                    <span key={t} className="prob-topic-chip">{t}</span>
-                                  ))}
-                                  {topicsList.length > 2 && (
-                                    <span className="prob-topic-chip">+{topicsList.length - 2}</span>
-                                  )}
-                                </div>
-                              </td>
-                              <td>
-                                <span className={`difficulty-badge ${prob.difficulty.toLowerCase()}`} style={{ fontSize: '10px', padding: '2px 5px' }}>
-                                  {prob.difficulty}
-                                </span>
-                              </td>
-                              <td style={{ fontSize: '11px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
-                                📅 {prob.date_solved}
-                              </td>
-                              <td>
-                                <span className={`table-review-pill ${prob.review_status?.toLowerCase().includes('due') || prob.review_status?.toLowerCase().includes('today') ? 'urgent' : ''}`}>
-                                  {prob.review_status}
-                                </span>
-                                <div style={{ fontSize: '9px', color: '#71717a', marginTop: '2px' }}>
-                                  {prob.review_schedule}
-                                </div>
-                              </td>
-                              <td>
-                                <div className="inline-notes-container">
-                                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '4px' }}>
-                                    <select
-                                      className="inline-diff-select"
-                                      value={inlineDiffs[prob.problem_id] !== undefined ? inlineDiffs[prob.problem_id] : (prob.personal_difficulty || '')}
-                                      onChange={(e) => {
-                                        const newDiff = e.target.value;
-                                        setInlineDiffs(prev => ({ ...prev, [prob.problem_id]: newDiff }));
-                                        saveInlineNote(prob.problem_id, inlineNotes[prob.problem_id], newDiff, prob.title);
-                                      }}
-                                    >
-                                      <option value="">Flag: Unrated</option>
-                                      <option value="Hard for me">🔥 Hard for me</option>
-                                      <option value="Tricky Edge Cases">⚠️ Tricky Edge Cases</option>
-                                      <option value="Medium">⚡ Medium</option>
-                                      <option value="Easy">✅ Easy</option>
-                                    </select>
-                                    {isSaving && (
-                                      <span style={{ fontSize: '9px', color: '#4ade80', fontWeight: 'bold' }}>✓ Saved</span>
-                                    )}
-                                  </div>
-                                  <textarea
-                                    className="inline-note-input"
-                                    rows={2}
-                                    placeholder="Add revision note..."
-                                    value={inlineNotes[prob.problem_id] !== undefined ? inlineNotes[prob.problem_id] : (prob.user_notes || '')}
-                                    onChange={(e) => {
-                                      const newNote = e.target.value;
-                                      setInlineNotes(prev => ({ ...prev, [prob.problem_id]: newNote }));
-                                      saveInlineNote(prob.problem_id, newNote, inlineDiffs[prob.problem_id], prob.title);
-                                    }}
-                                  />
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()
-            )}
-          </div>
-        )}
-
         {/* TAB 4: HISTORY SYNC */}
         {!activeTest && !isMockMode && activeTab === 'history' && (
           <div>
@@ -2422,7 +2193,7 @@ export default function App() {
                     <span>👤</span> {syncedAccount.username || 'LeetCode User'}
                   </div>
                   <div style={{ fontSize: '11px', color: '#a1a1aa', marginTop: '3px' }}>
-                    <strong>{syncedAccount.synced_count || solvedProblems.length || 0}</strong> Solved Problems Stored Persistently in Database
+                    <strong>{syncedAccount.synced_count || solvedProblems.length || 0}</strong> Solved Problems Synced
                   </div>
                   {syncedAccount.last_synced && (
                     <div style={{ fontSize: '10px', color: '#71717a', marginTop: '2px' }}>
@@ -2430,20 +2201,10 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <button
-                    className="coach-btn"
-                    style={{ padding: '5px 10px', fontSize: '11px', width: 'auto' }}
-                    onClick={() => {
-                      setActiveTab('solved');
-                      fetchSolvedProblems();
-                    }}
-                  >
-                    📊 Open Solved Table
-                  </button>
+                <div>
                   <button
                     className="coach-btn secondary"
-                    style={{ padding: '5px 10px', fontSize: '11px', width: 'auto' }}
+                    style={{ padding: '6px 12px', fontSize: '11px', width: 'auto' }}
                     onClick={openWeeklyDigest}
                   >
                     ✨ AI Weekly Log

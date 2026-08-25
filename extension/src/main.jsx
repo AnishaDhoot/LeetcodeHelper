@@ -384,6 +384,180 @@ const observer = new MutationObserver((mutations) => {
   }
 });
 
+// Direct Content Script Fairplay Locking for Solutions, Editorial, Discussions, and Submissions
+const injectDirectLockCSS = (isLocked) => {
+  let styleEl = document.getElementById('dsa-tutor-fairplay-css');
+  if (isLocked) {
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'dsa-tutor-fairplay-css';
+      styleEl.textContent = `
+        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"], a[href*="/submission"],
+        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submissions"], div[data-layout-path*="submission"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submissions"], [data-track-load*="submission"],
+        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submissions"], [data-key*="submission"],
+        div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
+        div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
+        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"], section[class*="submissions"] {
+          display: none !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+          opacity: 0 !important;
+          height: 0 !important;
+          width: 0 !important;
+          overflow: hidden !important;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(styleEl);
+    }
+  } else if (styleEl) {
+    styleEl.remove();
+  }
+};
+
+let directAssessmentLocked = false;
+let directAssessmentReason = '';
+
+const isForbiddenDOMElement = (el) => {
+  if (!el || el === document.body) return false;
+  if (el.closest && el.closest('#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror')) {
+    return false;
+  }
+
+  let curr = el;
+  let depth = 0;
+  while (curr && curr !== document.body && depth < 8) {
+    if (curr.id && (curr.id.startsWith('dsa-tutor') || curr.id.includes('dsa-tutor'))) return false;
+
+    const text = (curr.textContent || '').trim().toLowerCase();
+    const href = (curr.getAttribute ? curr.getAttribute('href') || '' : '').toLowerCase();
+    const dataPath = (curr.getAttribute ? curr.getAttribute('data-layout-path') || '' : '').toLowerCase();
+    const dataKey = (curr.getAttribute ? curr.getAttribute('data-key') || '' : '').toLowerCase();
+    const dataTrack = (curr.getAttribute ? curr.getAttribute('data-track-load') || '' : '').toLowerCase();
+    const ariaLabel = (curr.getAttribute ? curr.getAttribute('aria-label') || '' : '').toLowerCase();
+    const title = (curr.getAttribute ? curr.getAttribute('title') || '' : '').toLowerCase();
+    const idStr = (curr.id || '').toLowerCase();
+    const role = (curr.getAttribute ? curr.getAttribute('role') || '' : '').toLowerCase();
+    const cls = (curr.className && typeof curr.className === 'string' ? curr.className : '').toLowerCase();
+
+    if (
+      href.includes('/editorial') || href.includes('/solution') || href.includes('/solutions') ||
+      href.includes('/discussion') || href.includes('/discussions') || href.includes('/community') ||
+      href.includes('/comments') || href.includes('/submission') || href.includes('/submissions') ||
+      dataPath.includes('editorial') || dataPath.includes('solution') || dataPath.includes('discussion') ||
+      dataPath.includes('community') || dataPath.includes('submission') ||
+      dataKey.includes('editorial') || dataKey.includes('solution') || dataKey.includes('discussion') ||
+      dataKey.includes('community') || dataKey.includes('submission') ||
+      dataTrack.includes('editorial') || dataTrack.includes('solution') || dataTrack.includes('discussion') ||
+      dataTrack.includes('submission') ||
+      (ariaLabel.includes('solution') && !ariaLabel.includes('submit')) ||
+      ariaLabel.includes('editorial') || ariaLabel.includes('discussion') || ariaLabel.includes('submission') ||
+      ariaLabel.includes('community') || ariaLabel.includes('comment') ||
+      (title.includes('solution') && !title.includes('submit')) ||
+      title.includes('editorial') || title.includes('discussion') || title.includes('submission') ||
+      idStr.includes('editorial') || idStr.includes('discussion') || idStr.includes('submission') ||
+      cls.includes('editorial') || cls.includes('solution') || cls.includes('discussion') || cls.includes('submission')
+    ) {
+      return true;
+    }
+
+    if (
+      curr.tagName === 'A' || curr.tagName === 'BUTTON' || role === 'tab' ||
+      cls.includes('tab') || cls.includes('nav') || cls.includes('btn') || dataPath || dataKey
+    ) {
+      if (
+        text === 'editorial' || text.startsWith('editorial') ||
+        text === 'solutions' || text === 'solution' || text.startsWith('solutions') ||
+        text === 'discussion' || text === 'discussions' || text.startsWith('discussion') ||
+        text === 'submissions' || text === 'submission' || text.startsWith('submissions') ||
+        text === 'community' || text === 'comments'
+      ) {
+        return true;
+      }
+    }
+
+    curr = curr.parentElement;
+    depth++;
+  }
+
+  return false;
+};
+
+const applyDirectTabLocking = (locked, reason = 'Badge Test') => {
+  directAssessmentLocked = !!locked;
+  directAssessmentReason = reason || '';
+  injectDirectLockCSS(locked);
+
+  if (locked) {
+    const curHref = window.location.href;
+    if (
+      curHref.includes('/editorial') ||
+      curHref.includes('/solution') ||
+      curHref.includes('/discussion') ||
+      curHref.includes('/community') ||
+      curHref.includes('/submission')
+    ) {
+      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions?)[^/]*\/?/gi, '/description/');
+      if (cleanUrl !== curHref) {
+        window.location.replace(cleanUrl);
+      }
+    }
+
+    const tabs = Array.from(document.querySelectorAll('a, button, [role="tab"], [data-layout-path], [data-key], [data-track-load], div[class*="tab"], div[class*="nav"], li'));
+    tabs.forEach(el => {
+      if (el.closest('#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container')) return;
+      if (isForbiddenDOMElement(el)) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+        el.style.setProperty('opacity', '0', 'important');
+        el.style.setProperty('height', '0', 'important');
+        el.style.setProperty('width', '0', 'important');
+        el.style.setProperty('overflow', 'hidden', 'important');
+        el.setAttribute('data-dsa-tab-locked', 'true');
+      }
+    });
+  } else {
+    document.querySelectorAll('[data-dsa-tab-locked="true"]').forEach(el => {
+      el.style.removeProperty('display');
+      el.style.removeProperty('visibility');
+      el.style.removeProperty('pointer-events');
+      el.style.removeProperty('opacity');
+      el.style.removeProperty('height');
+      el.style.removeProperty('width');
+      el.style.removeProperty('overflow');
+      el.removeAttribute('data-dsa-tab-locked');
+    });
+  }
+};
+
+document.addEventListener('click', (e) => {
+  if (!directAssessmentLocked) return;
+
+  const path = e.composedPath ? e.composedPath() : [];
+  for (const el of path) {
+    if (el && el.id && (el.id === 'dsa-tutor-panel-root' || el.id === 'dsa-tutor-react-container' || el.id === 'dsa-tutor-panel-container')) {
+      return;
+    }
+  }
+
+  if (isForbiddenDOMElement(e.target)) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    applyDirectTabLocking(true, directAssessmentReason);
+
+    const curHref = window.location.href;
+    if (curHref.includes('/editorial') || curHref.includes('/solution') || curHref.includes('/discussion') || curHref.includes('/submissions')) {
+      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions?)[^/]*\/?/gi, '/description/');
+      if (cleanUrl !== curHref) {
+        window.location.replace(cleanUrl);
+      }
+    }
+    return false;
+  }
+}, true);
+
 // ============================================================================
 // 5. Expose on-demand context helpers for the React Code Coach layer
 // ============================================================================
@@ -396,6 +570,7 @@ window.dsaTutor.setEditorReadOnly = (readOnly) => {
   window.postMessage({ type: 'SET_READ_ONLY', readOnly }, '*');
 };
 window.dsaTutor.setAssessmentLocked = (locked, reason) => {
+  applyDirectTabLocking(locked, reason);
   window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked, reason }, '*');
 };
 window.dsaTutor.resetEditor = () => {

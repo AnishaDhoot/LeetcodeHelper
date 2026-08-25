@@ -150,18 +150,71 @@ async function fetchSolvedProblemsViaTab() {
         console.warn("[DSA Tutor] Bulk topic fetch failed:", e);
       }
 
+      const CANONICAL_TOPIC_MAP = {
+        "array": "Arrays",
+        "arrays": "Arrays",
+        "arrays & hashing": "Arrays",
+        "matrix": "Arrays",
+        "sorting": "Arrays",
+        "string": "Strings",
+        "strings": "Strings",
+        "string matching": "Strings",
+        "two pointers": "Sliding Window & Two Pointers",
+        "sliding window": "Sliding Window & Two Pointers",
+        "sliding window & two pointers": "Sliding Window & Two Pointers",
+        "binary search": "Binary Search",
+        "linked list": "Linked List",
+        "linked lists": "Linked List",
+        "stack": "Stack & Queue",
+        "stacks": "Stack & Queue",
+        "queue": "Stack & Queue",
+        "queues": "Stack & Queue",
+        "monotonic stack": "Stack & Queue",
+        "monotonic queue": "Stack & Queue",
+        "hash table": "Hashing",
+        "hashing": "Hashing",
+        "hashmap": "Hashing",
+        "recursion": "Recursion & Backtracking",
+        "backtracking": "Recursion & Backtracking",
+        "tree": "Trees & BST",
+        "trees": "Trees & BST",
+        "binary tree": "Trees & BST",
+        "binary search tree": "Trees & BST",
+        "heap (priority queue)": "Heaps / Priority Queue",
+        "heap": "Heaps / Priority Queue",
+        "heaps": "Heaps / Priority Queue",
+        "graph": "Graphs",
+        "graphs": "Graphs",
+        "depth-first search": "Graphs",
+        "breadth-first search": "Graphs",
+        "dynamic programming": "Dynamic Programming",
+        "dp": "Dynamic Programming",
+        "greedy": "Greedy",
+        "trie": "Trie & Bit Manipulation",
+        "bit manipulation": "Trie & Bit Manipulation"
+      };
+
+      const cleanTags = (rawList) => {
+        const out = [];
+        for (const t of (rawList || [])) {
+          const norm = CANONICAL_TOPIC_MAP[t?.trim()?.toLowerCase()] || t?.trim();
+          if (norm && !out.includes(norm)) out.push(norm);
+        }
+        return out.length > 0 ? out : ["Arrays"];
+      };
+
       const missingSlugs = [];
       const problems = [];
 
       for (const { slug, title, difficulty } of solved) {
         const ts = timestampMap.get(slug) || null;
         if (topicMap.has(slug)) {
-          const tags = topicMap.get(slug);
+          const tags = cleanTags(topicMap.get(slug));
           problems.push({
             problem_id: slug,
             title,
             difficulty,
-            topics: tags.length > 0 ? tags : ["Arrays & Hashing"],
+            topics: tags,
             timestamp: ts
           });
         } else {
@@ -186,16 +239,16 @@ async function fetchSolvedProblemsViaTab() {
                   })
                 });
                 const d = r.ok ? await r.json() : null;
-                const tags = (d?.data?.question?.topicTags || []).map(t => t.name);
+                const tags = cleanTags((d?.data?.question?.topicTags || []).map(t => t.name));
                 return {
                   problem_id: slug,
                   title,
                   difficulty,
-                  topics: tags.length > 0 ? tags : ["Arrays & Hashing"],
+                  topics: tags,
                   timestamp
                 };
               } catch {
-                return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"], timestamp };
+                return { problem_id: slug, title, difficulty, topics: ["Arrays"], timestamp };
               }
             })
           );
@@ -473,6 +526,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "mock_evaluate") {
     backendFetch("/mock-interview/evaluate", { method: "POST", body: request.payload })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (request.action === "mock_abandon") {
+    backendFetch("/mock-interview/abandon", { method: "POST" })
       .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;

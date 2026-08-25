@@ -53,7 +53,8 @@ from backend.recommender import (
     update_spaced_repetition,
     compute_weak_pairs,
     get_topic_time_trend,
-    filter_problems_for_topic
+    filter_problems_for_topic,
+    normalize_topic
 )
 from backend.seed import seed_db, SEED_DATA
 
@@ -607,14 +608,17 @@ STANDARD_DSA_TOPICS = [
 @app.get("/topics/mastery", response_model=List[TopicMasterySchema])
 def get_mastery(db: Session = Depends(get_db)):
     """
-    Returns the current mastery data for all topics, ensuring all standard DSA topics are present.
+    Returns the current mastery data for all 14 standard DSA topics,
+    consolidating and merging any non-canonical variant topics (e.g. 'Array' -> 'Arrays').
     """
-    masteries = {m.topic: m for m in db.query(TopicMastery).all()}
-    
-    # Auto-seed any missing standard topics
+    all_masteries = db.query(TopicMastery).all()
+    canonical_set = set(STANDARD_DSA_TOPICS)
+
+    # 1. First ensure all 14 standard topics exist in DB
+    existing_canonical = {m.topic: m for m in all_masteries if m.topic in canonical_set}
     newly_added = False
     for topic_name in STANDARD_DSA_TOPICS:
-        if topic_name not in masteries:
+        if topic_name not in existing_canonical:
             new_m = TopicMastery(
                 topic=topic_name,
                 level=0,
@@ -623,26 +627,44 @@ def get_mastery(db: Session = Depends(get_db)):
                 success_count=0
             )
             db.add(new_m)
-            masteries[topic_name] = new_m
+            existing_canonical[topic_name] = new_m
             newly_added = True
-            
+
+    # 2. Merge non-canonical topics into canonical ones and delete non-canonical rows
+    for m in all_masteries:
+        if m.topic not in canonical_set:
+            target_topic = normalize_topic(m.topic)
+            if target_topic in existing_canonical:
+                target_m = existing_canonical[target_topic]
+                target_m.attempts_count += m.attempts_count
+                target_m.success_count += m.success_count
+                if (m.level or 0) > (target_m.level or 0):
+                    target_m.level = m.level
+                    target_m.rating = m.rating
+                # Update any badge tests referencing this old topic name
+                db.query(BadgeTest).filter(BadgeTest.topic == m.topic).update({"topic": target_topic})
+            db.delete(m)
+            newly_added = True
+
     if newly_added:
         db.commit()
 
     result = []
-    for m in masteries.values():
-        result.append(TopicMasterySchema(
-            topic=m.topic,
-            mastery_score=m.mastery_score,
-            attempts_count=m.attempts_count,
-            success_rate=m.success_rate,
-            rating=m.rating,
-            level=m.level,
-            badge=m.badge,
-            next_questions=[],
-            last_attempted=m.last_attempted,
-            next_due_date=m.next_due_date
-        ))
+    for topic_name in STANDARD_DSA_TOPICS:
+        m = existing_canonical.get(topic_name)
+        if m:
+            result.append(TopicMasterySchema(
+                topic=m.topic,
+                mastery_score=m.mastery_score,
+                attempts_count=m.attempts_count,
+                success_rate=m.success_rate,
+                rating=m.rating,
+                level=m.level,
+                badge=m.badge,
+                next_questions=[],
+                last_attempted=m.last_attempted,
+                next_due_date=m.next_due_date
+            ))
     return result
 
 
@@ -669,9 +691,10 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         else:
             raise HTTPException(status_code=400, detail="A Badge Test is already active.")
 
-    mastery = db.query(TopicMastery).filter(TopicMastery.topic == req.topic).first()
+    canonical_topic = normalize_topic(req.topic)
+    mastery = db.query(TopicMastery).filter(TopicMastery.topic == canonical_topic).first()
     if not mastery:
-        mastery = TopicMastery(topic=req.topic, level=0, rating=1200.0)
+        mastery = TopicMastery(topic=canonical_topic, level=0, rating=1200.0)
         db.add(mastery)
         db.flush()
 
@@ -983,8 +1006,17 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
 
     # 1. Upsert each problem (mark solved) and collect per-topic solved counts.
     for prob in req.problems:
-        topics_csv = ", ".join(prob.topics) if prob.topics else "Arrays & Hashing"
-        for t in [t.strip() for t in topics_csv.split(",") if t.strip()]:
+        raw_topics = prob.topics if prob.topics else ["Arrays"]
+        normalized_topics_list = []
+        for t in raw_topics:
+            norm = normalize_topic(t)
+            if norm and norm not in normalized_topics_list:
+                normalized_topics_list.append(norm)
+        if not normalized_topics_list:
+            normalized_topics_list = ["Arrays"]
+
+        topics_csv = ", ".join(normalized_topics_list)
+        for t in normalized_topics_list:
             topics_seen.add(t)
             solved_per_topic[t] += 1
 
@@ -1001,8 +1033,13 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             except Exception:
                 actual_solve_dt = None
 
+        has_explicit_date = actual_solve_dt is not None
         if not actual_solve_dt:
-            actual_solve_dt = now_utc
+            # Fallback to an earlier date (60 days ago) so bulk lifetime sync doesn't count as current week solves
+            actual_solve_dt = now_utc - timedelta(days=60)
+            expl_text = "Synced from LeetCode solved history (historical baseline)."
+        else:
+            expl_text = "Synced from LeetCode solved history."
 
         url = f"https://leetcode.com/problems/{prob.problem_id}/"
         problem = existing_problems.get(prob.problem_id)
@@ -1032,7 +1069,7 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
                 problem_id=prob.problem_id,
                 verdict="Accepted",
                 root_cause_category="none",
-                explanation_text="Synced from LeetCode solved history.",
+                explanation_text=expl_text,
                 timestamp=actual_solve_dt
             )
             db.add(att)
@@ -1793,8 +1830,25 @@ def evaluate_mock_session(req: MockEvaluateRequest, db: Session = Depends(get_db
     duration = session.time_taken_seconds or int((get_utc_now() - session.start_time).total_seconds())
     card = generate_mock_scorecard(session.company, duration, questions_data)
     session.scorecard = json.dumps(card)
+    if not session.submitted_at:
+        session.submitted_at = get_utc_now()
+    if not session.time_taken_seconds:
+        session.time_taken_seconds = duration
     db.commit()
     return card
+
+
+@app.post("/mock-interview/abandon")
+def abandon_mock_interview(db: Session = Depends(get_db)):
+    """Closes any active mock interview session immediately."""
+    active_mocks = db.query(MockInterviewSession).filter(MockInterviewSession.submitted_at.is_(None)).all()
+    now = get_utc_now()
+    for m in active_mocks:
+        m.submitted_at = now
+        if not m.time_taken_seconds:
+            m.time_taken_seconds = int((now - m.start_time).total_seconds())
+    db.commit()
+    return {"status": "abandoned", "count": len(active_mocks)}
 
 
 @app.post("/mock-interview/switch")
@@ -2113,7 +2167,10 @@ def get_mock_interview_report(db: Session = Depends(get_db)):
 def get_weekly_journal(db: Session = Depends(get_db)):
     """Generates past 7 days mistake journal and aggregated stats (Tier 5.1)."""
     seven_days_ago = get_utc_now() - timedelta(days=7)
-    attempts = db.query(Attempt).filter(Attempt.timestamp >= seven_days_ago).all()
+    attempts = db.query(Attempt).filter(
+        Attempt.timestamp >= seven_days_ago,
+        (Attempt.explanation_text.is_(None) | (Attempt.explanation_text != "Synced from LeetCode solved history (historical baseline)."))
+    ).all()
 
     by_category = Counter()
     example_problems = set()
@@ -2133,7 +2190,8 @@ def get_weekly_journal(db: Session = Depends(get_db)):
     # Generate a detailed list of mistakes grouped by problem
     failed_attempts = db.query(Attempt).filter(
         Attempt.timestamp >= seven_days_ago,
-        Attempt.verdict != "Accepted"
+        Attempt.verdict != "Accepted",
+        (Attempt.explanation_text.is_(None) | (Attempt.explanation_text != "Synced from LeetCode solved history (historical baseline)."))
     ).order_by(Attempt.timestamp.desc()).all()
 
     problem_mistakes = {}
@@ -2194,7 +2252,8 @@ def get_weekly_journal(db: Session = Depends(get_db)):
     # Generate a detailed list of solved problems with date solved
     accepted_attempts = db.query(Attempt).filter(
         Attempt.timestamp >= seven_days_ago,
-        Attempt.verdict == "Accepted"
+        Attempt.verdict == "Accepted",
+        (Attempt.explanation_text.is_(None) | (Attempt.explanation_text != "Synced from LeetCode solved history (historical baseline)."))
     ).order_by(Attempt.timestamp.desc()).all()
 
     if accepted_attempts:

@@ -48,19 +48,32 @@ def query_groq(prompt: str, system_prompt: str) -> str:
     
     client = Groq(api_key=api_key)
     target_model = get_groq_model()
-    candidate_models = [target_model, "openai/gpt-oss-20b", "openai/gpt-oss-120b", "groq/compound-mini", "groq/compound", "qwen/qwen3.6-27b"]
+    candidate_models = [
+        target_model,
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it"
+    ]
     
     # Remove duplicates while preserving order
     seen = set()
     models_to_try = [m for m in candidate_models if not (m in seen or seen.add(m))]
 
+    # Ensure system prompt explicitly mentions JSON format so Groq's JSON validator passes
+    json_system_prompt = system_prompt
+    if "json" not in json_system_prompt.lower():
+        json_system_prompt = (json_system_prompt + "\nReturn your response as a valid JSON object.").strip()
+
     last_exception = None
     for model in models_to_try:
-        # Step 1: Try with strict json_object response format
+        # Step 1: Try with json_object response format
         try:
             chat_completion = client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": json_system_prompt},
                     {"role": "user", "content": prompt}
                 ],
                 model=model,
@@ -70,30 +83,23 @@ def query_groq(prompt: str, system_prompt: str) -> str:
             )
             return chat_completion.choices[0].message.content
         except Exception as e:
-            err_msg = str(e)
-            print(f"Attempt with model '{model}' (json_object mode) failed: {e}")
             last_exception = e
 
-            # Step 2: If JSON validation failed on Groq side, retry without response_format constraint
-            if "json_validate_failed" in err_msg or "400" in err_msg:
-                try:
-                    print(f"Retrying '{model}' without json_object constraint...")
-                    chat_completion = client.chat.completions.create(
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
-                        ],
-                        model=model,
-                        temperature=0.2,
-                        max_tokens=1024
-                    )
-                    return chat_completion.choices[0].message.content
-                except Exception as retry_e:
-                    print(f"Retry without json_object on '{model}' also failed: {retry_e}")
-                    last_exception = retry_e
-
-            # Continue trying next candidate model in list
-            continue
+            # Step 2: Fallback immediately without response_format constraint
+            try:
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": json_system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    model=model,
+                    temperature=0.2,
+                    max_tokens=1024
+                )
+                return chat_completion.choices[0].message.content
+            except Exception as retry_e:
+                last_exception = retry_e
+                continue
 
     if last_exception:
         raise last_exception
