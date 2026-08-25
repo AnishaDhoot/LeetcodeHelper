@@ -380,47 +380,73 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
-      // 1. Click LeetCode's native Reset Code button in DOM to restore official starter template
-      const resetCandidates = Array.from(document.querySelectorAll(
-        'button, div[role="button"], span[role="button"], [data-keyup="reset-code"], [data-track-name="reset_code"], [aria-label*="Reset"], [aria-label*="reset"], [title*="Reset"], [title*="reset"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"]'
-      ));
-      let resetBtn = resetCandidates.find(el => {
-        if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container")) return false;
-        const title = (el.getAttribute('title') || el.getAttribute('aria-label') || el.getAttribute('data-cy') || el.getAttribute('data-track-name') || el.textContent || '').toLowerCase();
-        return title.includes('reset') || title.includes('restore') || title.includes('revert') || title.includes('retrieve default');
-      });
+      const executeReset = () => {
+        const allButtons = Array.from(document.querySelectorAll(
+          'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset"], [aria-label*="reset"], [title*="Reset"], [title*="reset"], [aria-label*="default code"], [title*="default code"], [aria-label*="Retrieve default"], [title*="Retrieve default"]'
+        ));
 
-      // Also search buttons near editor toolbar
-      if (!resetBtn) {
-        const toolbarBtns = Array.from(document.querySelectorAll('div[class*="editor"] button, .monaco-editor button, [class*="tools"] button'));
-        resetBtn = toolbarBtns.find(b => {
-          const html = b.innerHTML.toLowerCase();
-          return html.includes("reset") || html.includes("rotate-ccw") || html.includes("history") || html.includes("restore");
-        });
-      }
+        let resetBtn = allButtons.find(el => {
+          if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+          const str = (
+            (el.getAttribute('title') || '') + ' ' +
+            (el.getAttribute('aria-label') || '') + ' ' +
+            (el.getAttribute('data-cypress') || '') + ' ' +
+            (el.getAttribute('data-cy') || '') + ' ' +
+            (el.getAttribute('data-track-name') || '') + ' ' +
+            (el.textContent || '') + ' ' +
+            (el.innerHTML || '')
+          ).toLowerCase();
 
-      if (resetBtn) {
-        resetBtn.click();
-        
-        // Multi-attempt confirmation click to handle variable modal animation delays
-        [100, 250, 450, 800].forEach(delay => {
-          setTimeout(() => {
-            const confirmBtns = Array.from(document.querySelectorAll('button, div[role="button"], [data-cy="confirm-btn"], [class*="modal"] button'));
-            const confirmBtn = confirmBtns.find(b => {
-              if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container")) return false;
-              const txt = (b.textContent || '').trim().toLowerCase();
-              return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code');
-            });
-            if (confirmBtn) confirmBtn.click();
-          }, delay);
+          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('rotate-ccw');
         });
-      }
+
+        // Also search inside editor header toolbars specifically
+        if (!resetBtn) {
+          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"]');
+          for (const bar of editorToolbars) {
+            const btns = bar.querySelectorAll('button, svg, [role="button"]');
+            for (const b of btns) {
+              const html = (b.outerHTML || '').toLowerCase();
+              if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default')) {
+                resetBtn = b.closest('button, [role="button"]') || b;
+                break;
+              }
+            }
+            if (resetBtn) break;
+          }
+        }
+
+        if (resetBtn) {
+          resetBtn.click();
+          // Confirm the reset modal with multiple attempts
+          [100, 250, 450, 700, 1100].forEach(delay => {
+            setTimeout(() => {
+              const confirmBtns = Array.from(document.querySelectorAll(
+                'button, div[role="button"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button'
+              ));
+              const confirmBtn = confirmBtns.find(b => {
+                if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+                const txt = (b.textContent || '').trim().toLowerCase();
+                const cls = (b.className || '').toLowerCase();
+                return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm');
+              });
+              if (confirmBtn) confirmBtn.click();
+            }, delay);
+          });
+        }
+      };
+
+      // Run immediate and staggered attempts to catch DOM readiness
+      executeReset();
+      setTimeout(executeReset, 350);
+      setTimeout(executeReset, 800);
+      setTimeout(executeReset, 1500);
 
       // Re-apply readOnly state if locked
       if (window.__dsaTutorReadOnly) {
         setTimeout(() => {
           applyReadOnlyState(true);
-        }, 300);
+        }, 400);
       }
     } catch (e) {
       console.error("[DSA Tutor Injected] Error resetting editor:", e);
