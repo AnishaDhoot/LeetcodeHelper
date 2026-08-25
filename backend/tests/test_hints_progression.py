@@ -3,15 +3,16 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.database import get_db, Base, engine, SessionLocal
-from backend.models import Problem, TopicMastery, Attempt, SpacedRepetition
+from backend.models import Problem, TopicMastery, Attempt, SpacedRepetition, BadgeTest, UserConfig
 
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
+    db.query(BadgeTest).delete()
+    db.query(Attempt).delete()
+    db.query(UserConfig).delete()
     
     # Seed problems with specific topics and companies
     p1 = Problem(id="two-sum", title="Two Sum", url="https://leetcode.com/problems/two-sum", difficulty="Easy", topics="Arrays", companies="Cisco,Google", is_premium=False)
@@ -19,17 +20,20 @@ def setup_db():
     p3 = Problem(id="coin-change", title="Coin Change", url="https://leetcode.com/problems/coin-change", difficulty="Medium", topics="Dynamic Programming", companies="Cisco,Amazon", is_premium=False)
     p4 = Problem(id="invert-binary-tree", title="Invert Binary Tree", url="https://leetcode.com/problems/invert-binary-tree", difficulty="Easy", topics="Trees", companies="Google", is_premium=False)
     
-    db.add_all([p1, p2, p3, p4])
+    db.merge(p1)
+    db.merge(p2)
+    db.merge(p3)
+    db.merge(p4)
     
     tm1 = TopicMastery(topic="Arrays", level=0, rating=1200.0, attempts_count=1, success_count=0)
     tm2 = TopicMastery(topic="Dynamic Programming", level=0, rating=1100.0, attempts_count=1, success_count=0)
     tm3 = TopicMastery(topic="Graphs", level=0, rating=1250.0, attempts_count=1, success_count=0)
-    
-    db.add_all([tm1, tm2, tm3])
+    db.merge(tm1)
+    db.merge(tm2)
+    db.merge(tm3)
     db.commit()
     db.close()
     yield
-    Base.metadata.drop_all(bind=engine)
 
 
 def test_progressive_hints_level_1_2_3_strictly_returned():

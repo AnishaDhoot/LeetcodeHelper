@@ -1397,3 +1397,261 @@
     transform: scale(1);
   }
 }
+
+/* ── Solved Problems Spreadsheet & Table ── */
+.solved-tracker-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.solved-header-hero {
+  background: linear-gradient(135deg, #18181b 0%, #0f172a 100%);
+  border: 1px solid #3b82f644;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.solved-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.solved-hero-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f4f4f5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.solved-hero-subtitle {
+  font-size: 11px;
+  color: #a1a1aa;
+  margin-top: 3px;
+}
+
+.solved-hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.metric-pill {
+  background: rgba(9, 9, 11, 0.6);
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  padding: 6px 4px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metric-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: #71717a;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.metric-val {
+  font-size: 14px;
+  font-weight: 800;
+  color: #f4f4f5;
+}
+
+.solved-filters-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.solved-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #09090b;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  color: #f4f4f5;
+  padding: 6px 8px;
+  font-size: 11px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.solved-search-input:focus {
+  border-color: #3b82f6;
+}
+
+.solved-select-filter {
+  width: 100%;
+  box-sizing: border-box;
+  background: #09090b;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  color: #f4f4f5;
+  padding: 6px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+}
+
+.solved-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #121214;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.solved-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  text-align: left;
+}
+
+.solved-table thead {
+  position: sticky;
+  top: 0;
+  background: #18181b;
+  z-index: 2;
+  border-bottom: 2px solid #27272a;
+}
+
+.solved-table th {
+  padding: 8px 10px;
+  font-weight: 600;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+}
+
+.solved-table tbody tr {
+  border-bottom: 1px solid #27272a;
+  transition: background 0.15s ease;
+}
+
+.solved-table tbody tr:hover {
+  background: rgba(39, 39, 42, 0.4);
+}
+
+.solved-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+.prob-title-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.prob-idx {
+  color: #71717a;
+  font-size: 10px;
+  font-family: monospace;
+}
+
+.prob-link {
+  color: #60a5fa;
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-word;
+  transition: color 0.15s ease;
+}
+
+.prob-link:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.prob-tags-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.prob-topic-chip {
+  background: #27272a;
+  color: #d4d4d8;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+}
+
+.prob-company-chip {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.table-review-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #27272a;
+  color: #d4d4d8;
+}
+
+.table-review-pill.urgent {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.inline-notes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inline-diff-select {
+  background: #09090b;
+  border: 1px solid #3f3f46;
+  border-radius: 4px;
+  color: #fbbf24;
+  font-size: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+  outline: none;
+  max-width: 130px;
+}
+
+.inline-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #09090b;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  color: #e4e4e7;
+  padding: 4px 6px;
+  font-size: 10.5px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 36px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.inline-note-input:focus {
+  border-color: #3b82f6;
+  background: #121214;
+}

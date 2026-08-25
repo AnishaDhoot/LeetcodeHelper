@@ -115,10 +115,40 @@ def update_mastery_on_submission(
     else:
         # Failed: needs immediate review
         mastery.next_review_date = now
-
     db.commit()
     db.refresh(mastery)
     return mastery
+
+
+def filter_problems_for_topic(problems: list, topic: str) -> list:
+    """Helper to match problems that belong to the specified topic, isolating pure topic questions."""
+    if not topic:
+        return problems
+    t_lower = topic.lower()
+    matches = []
+    for p in problems:
+        p_topics = (p.topics or "").lower()
+        if "arrays" in t_lower or "hashing" in t_lower:
+            if ("tree" in p_topics or "graph" in p_topics or "dynamic programming" in p_topics) and "tree" not in t_lower and "graph" not in t_lower:
+                continue
+        if t_lower in p_topics:
+            matches.append(p)
+        elif "two pointers" in t_lower and ("two pointers" in p_topics or "two pointer" in p_topics or "array" in p_topics):
+            matches.append(p)
+        elif "sliding window" in t_lower and ("sliding window" in p_topics or "two pointers" in p_topics or "array" in p_topics):
+            matches.append(p)
+        elif "binary search" in t_lower and "binary search" in p_topics:
+            matches.append(p)
+        elif "tree" in t_lower and ("tree" in p_topics or "bst" in p_topics):
+            matches.append(p)
+        elif "graph" in t_lower and "graph" in p_topics:
+            matches.append(p)
+        elif "heap" in t_lower and ("heap" in p_topics or "priority queue" in p_topics):
+            matches.append(p)
+        elif "dp" in t_lower or "dynamic programming" in t_lower:
+            if "dynamic programming" in p_topics or "dp" in p_topics:
+                matches.append(p)
+    return matches if matches else [p for p in problems if t_lower in (p.topics or "").lower()]
 
 
 def update_spaced_repetition(db: Session, problem_id: str) -> SpacedRepetition:
@@ -300,20 +330,29 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
 
     # 3. Build a prioritized list of topics
     masteries = db.query(TopicMastery).all()
+    mastery_by_topic = {m.topic: m for m in masteries}
 
-    prioritized_topics = []
-
+    focus_topic_records = []
     for f_topic in focus_list:
-        focus_record = next((m for m in masteries if m.topic == f_topic), None)
-        if focus_record and focus_record not in prioritized_topics:
-            prioritized_topics.append(focus_record)
+        rec = mastery_by_topic.get(f_topic)
+        if not rec:
+            # Create a transient record for unseeded/unattempted focus topic
+            rec = TopicMastery(
+                topic=f_topic,
+                level=0,
+                rating=1200.0,
+                attempts_count=0,
+                success_count=0
+            )
+        if rec not in focus_topic_records:
+            focus_topic_records.append(rec)
 
     overdue_topics = []
     other_topics = []
 
     for m in masteries:
         if m.topic in focus_list:
-            continue  # already added above
+            continue  # already in focus_topic_records
 
         has_problems = any(
             m.topic in (p.topics or "") for p in base_pool
@@ -330,8 +369,7 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
     overdue_topics.sort(key=lambda x: x.mastery_score)
     other_topics.sort(key=lambda x: x.mastery_score)
 
-    prioritized_topics.extend(overdue_topics)
-    prioritized_topics.extend(other_topics)
+    prioritized_topics = list(focus_topic_records) + overdue_topics + other_topics
 
     recommendations = []
     recommended_ids = set()
@@ -351,49 +389,43 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
             return True
         return False
 
-    # 4. Iterate topics collecting at least 3 unique recommendations across distinct topics
-    # Pass 1: Select 1 best candidate per prioritized topic to ensure topic diversity
-    for topic_record in prioritized_topics:
-        if len(recommendations) >= 3:
-            break
+    _topic_stats_cache = {}
+
+    def get_topic_target_difficulty_and_reason(topic_record):
+        if topic_record.topic in _topic_stats_cache:
+            return _topic_stats_cache[topic_record.topic]
 
         topic = topic_record.topic
-        mastery_score = topic_record.mastery_score
         level = topic_record.level or 0
         badge = topic_record.badge
 
         if level == 0:
             target_difficulty = "Easy"
-            difficulty_reason = (
-                f"Locked badge for {topic}. Try Easy questions to build foundation and start a test!"
-            )
+            difficulty_reason = f"Locked badge for {topic}. Try Easy questions to build foundation and start a test!"
         elif level == 1:
             target_difficulty = "Easy"
-            difficulty_reason = (
-                f"You have the Bronze badge for {topic}. Try Easy questions to practice!"
-            )
+            difficulty_reason = f"You have the Bronze badge for {topic}. Try Easy questions to practice!"
         elif level in [2, 3]:
             target_difficulty = "Medium"
-            difficulty_reason = (
-                f"You have the {badge} badge for {topic}. Recommending Medium difficulty."
-            )
+            difficulty_reason = f"You have the {badge} badge for {topic}. Recommending Medium difficulty."
         else:
             target_difficulty = "Hard"
-            difficulty_reason = (
-                f"You have the {badge} badge for {topic}. Challenging you with Hard questions!"
-            )
+            difficulty_reason = f"You have the {badge} badge for {topic}. Challenging you with Hard questions!"
 
         # Adjust for recent streaks
         topic_problems = [p for p in base_pool if topic in (p.topics or "")]
         topic_problems = filter_problems_for_topic(topic_problems, topic)
         topic_prob_ids = [p.id for p in topic_problems]
-        recent_attempts = (
-            db.query(Attempt)
-            .filter(Attempt.problem_id.in_(topic_prob_ids))
-            .order_by(desc(Attempt.timestamp))
-            .limit(3)
-            .all()
-        )
+        
+        recent_attempts = []
+        if topic_prob_ids:
+            recent_attempts = (
+                db.query(Attempt)
+                .filter(Attempt.problem_id.in_(topic_prob_ids))
+                .order_by(desc(Attempt.timestamp))
+                .limit(3)
+                .all()
+            )
 
         if len(recent_attempts) >= 2:
             last_verdicts = [a.verdict for a in recent_attempts[:2]]
@@ -412,98 +444,166 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                     target_difficulty = "Easy"
                     difficulty_reason = f"Let's build core concepts in {topic} with an Easy problem."
 
-        # Build reason string
+        result = (target_difficulty, difficulty_reason, recent_attempts, topic_problems)
+        _topic_stats_cache[topic_record.topic] = result
+        return result
+
+    # 4. Strategy for recommendations:
+    # If user selected focus topics, allocate slots to focus topics first!
+    if focus_topic_records:
+        # Pass A: Round-robin across focus topics to add problems
+        max_per_focus = 3 if len(focus_topic_records) == 1 else 2
+        for _ in range(max_per_focus):
+            if len(recommendations) >= 3:
+                break
+            for topic_record in focus_topic_records:
+                if len(recommendations) >= 3:
+                    break
+                topic = topic_record.topic
+                target_diff, diff_reason, recent_attempts, topic_problems = get_topic_target_difficulty_and_reason(topic_record)
+                full_reason = f"Focus topic suggestion: {topic}. {diff_reason}"
+
+                # 1. Retry failed problem first if any
+                added = False
+                if recent_attempts and recent_attempts[0].verdict != "Accepted":
+                    failed_prob = db.query(Problem).filter(Problem.id == recent_attempts[0].problem_id).first()
+                    if failed_prob and failed_prob.id in base_pool_ids:
+                        if add_recommendation(
+                            failed_prob,
+                            f"Focus topic retry for {topic}: resolve last failure ({recent_attempts[0].root_cause_category or 'bug'})."
+                        ):
+                            added = True
+
+                # 2. Target difficulty problems (never solved / not solved recently)
+                if not added:
+                    cand_probs = [p for p in topic_problems if p.difficulty == target_diff and p.id not in recommended_ids]
+                    for p in cand_probs:
+                        if add_recommendation(p, full_reason):
+                            added = True
+                            break
+
+                # 3. Any difficulty in focus topic
+                if not added:
+                    cand_probs = [p for p in topic_problems if p.id not in recommended_ids]
+                    for p in cand_probs:
+                        if add_recommendation(p, f"Focus topic practice: {topic} ({p.difficulty})."):
+                            added = True
+                            break
+
+    # Pass B: Fill remaining recommendations from general prioritized topics (overdue -> lowest mastery)
+    for topic_record in prioritized_topics:
+        if len(recommendations) >= 3:
+            break
+
+        topic = topic_record.topic
+        target_diff, diff_reason, recent_attempts, topic_problems = get_topic_target_difficulty_and_reason(topic_record)
+
         if focus_list and topic in focus_list:
-            reason_prefix = "Focus topic suggestion."
+            reason_prefix = f"Focus topic suggestion: {topic}."
         elif topic_record in overdue_topics:
             reason_prefix = f"Review due for {topic}."
         else:
-            reason_prefix = f"Lowest mastery focus: {topic}."
+            reason_prefix = f"Mastery focus: {topic}."
 
-        full_reason = f"{reason_prefix} {difficulty_reason}"
+        full_reason = f"{reason_prefix} {diff_reason}"
 
-        # Prioritise retrying the last failed problem
+        # Retry failed problem
         added_for_topic = False
         if recent_attempts and recent_attempts[0].verdict != "Accepted":
-            failed_prob = db.query(Problem).filter(
-                Problem.id == recent_attempts[0].problem_id
-            ).first()
+            failed_prob = db.query(Problem).filter(Problem.id == recent_attempts[0].problem_id).first()
             if failed_prob and failed_prob.id in base_pool_ids:
                 if add_recommendation(
                     failed_prob,
-                    f"Retry {failed_prob.title} to resolve your last failure: "
-                    f"{recent_attempts[0].root_cause_category or 'implementation bug'}.",
+                    f"Retry {failed_prob.title} to resolve your last failure: {recent_attempts[0].root_cause_category or 'implementation bug'}."
                 ):
                     added_for_topic = True
 
         if not added_for_topic:
-            # Primary: problems matching topic & target difficulty (not solved recently)
             fourteen_days_ago = get_utc_now() - timedelta(days=14)
-            problems = [
-                p for p in topic_problems if p.difficulty == target_difficulty
-            ]
+            problems = [p for p in topic_problems if p.difficulty == target_diff]
 
-            # Sort: never solved first, then oldest solved
+            # Batch query accepted attempts for these problems to avoid N queries in sort
+            p_ids = [p.id for p in problems]
+            accepted_map = {}
+            if p_ids:
+                acc_records = (
+                    db.query(Attempt.problem_id, Attempt.timestamp)
+                    .filter(Attempt.problem_id.in_(p_ids), Attempt.verdict == "Accepted")
+                    .all()
+                )
+                for pid, ts in acc_records:
+                    if pid not in accepted_map or (ts and accepted_map[pid] and ts > accepted_map[pid]):
+                        accepted_map[pid] = ts
+
             def _solve_recency_score(prob):
-                last_acc = db.query(Attempt).filter(
-                    Attempt.problem_id == prob.id,
-                    Attempt.verdict == "Accepted"
-                ).order_by(desc(Attempt.timestamp)).first()
-                if not last_acc:
-                    return 0  # Highest priority: never solved
-                if last_acc.timestamp < fourteen_days_ago:
-                    return 1  # Solved long ago
-                return 2  # Solved recently
+                last_ts = accepted_map.get(prob.id)
+                if not last_ts:
+                    return 0
+                if last_ts < fourteen_days_ago:
+                    return 1
+                return 2
 
             problems.sort(key=_solve_recency_score)
-
             for p in problems:
-                recent_success = db.query(Attempt).filter(
-                    Attempt.problem_id == p.id,
-                    Attempt.verdict == "Accepted",
-                    Attempt.timestamp >= fourteen_days_ago,
-                ).first()
-                if not recent_success:
-                    if add_recommendation(p, full_reason):
-                        added_for_topic = True
-                        break
-
-        # Fallback: any difficulty in topic if nothing added yet
-        if not added_for_topic:
-            sorted_topic_problems = list(topic_problems)
-            sorted_topic_problems.sort(key=lambda pr: 0 if not getattr(pr, 'is_solved', False) else 1)
-            for p in sorted_topic_problems:
-                if add_recommendation(p, f"{reason_prefix} Practicing topic: {topic}."):
+                if add_recommendation(p, full_reason):
                     added_for_topic = True
                     break
 
-    # Pass 2: If fewer than 3 recommendations (e.g. fewer than 3 topics available), fill with more problems from prioritized topics
-    if len(recommendations) < 3:
-        for topic_record in prioritized_topics:
-            if len(recommendations) >= 3:
-                break
-            topic = topic_record.topic
-            topic_problems = [p for p in base_pool if topic in (p.topics or "")]
-            for p in topic_problems:
-                if len(recommendations) >= 3:
-                    break
-                add_recommendation(p, f"Practicing topic: {topic}.")
-
-    # Pass 3: Global fallback if base pool has other problems
+    # Pass C: Fallback to base pool or focused topics if company-specific pool is exhausted or empty
     if len(recommendations) < 3:
         for p in base_pool:
             if len(recommendations) >= 3:
                 break
-            add_recommendation(p, "General practice recommendation.")
+            add_recommendation(p, f"Company practice recommendation for {company}." if company else "General practice recommendation.")
 
-    # --- Tier 2.2: epsilon-greedy exploration ---
-    if recommendations and random.random() < EPSILON:
-        # Pick a random problem outside the productive-struggle band (mastery 0.40–0.65)
-        # i.e. topics that are either very easy (mastery > 0.65) or untouched (< 0.40 and new)
+    # Pass D: If company filter was applied and still fewer than 3 recommendations, fallback to all non-premium problems prioritized by focus/weak topics
+    if len(recommendations) < 3 and company:
+        all_non_prem = db.query(Problem).filter(Problem.is_premium == False).all()
+        all_non_prem_map = {p.id: p for p in all_non_prem}
+        
+        # Try focus topics first
+        for topic_record in prioritized_topics:
+            if len(recommendations) >= 3:
+                break
+            topic = topic_record.topic
+            topic_probs = [p for p in all_non_prem if topic in (p.topics or "")]
+            for p in topic_probs:
+                if p.id not in recommended_ids and p.id not in due_problem_ids:
+                    reason = f"Focused Practice: No direct {company} questions found; recommending this {p.difficulty} {topic} problem based on your focus profile."
+                    recommendations.append({
+                        "problem_id": p.id,
+                        "title": p.title,
+                        "url": p.url,
+                        "difficulty": p.difficulty,
+                        "reason": reason,
+                        "topics": p.topics,
+                        "companies": p.companies,
+                    })
+                    recommended_ids.add(p.id)
+                    if len(recommendations) >= 3:
+                        break
+
+        # Final fill from all problems if still needed
+        for p in all_non_prem:
+            if len(recommendations) >= 3:
+                break
+            if p.id not in recommended_ids and p.id not in due_problem_ids:
+                recommendations.append({
+                    "problem_id": p.id,
+                    "title": p.title,
+                    "url": p.url,
+                    "difficulty": p.difficulty,
+                    "reason": f"Focused Practice: General recommendation based on topic mastery (no additional questions for {company}).",
+                    "topics": p.topics,
+                    "companies": p.companies,
+                })
+                recommended_ids.add(p.id)
+
+    # --- Tier 2.2: epsilon-greedy exploration (only if no focus list is set and no company filter) ---
+    if not focus_list and not company and recommendations and random.random() < EPSILON:
         exploration_topics = [
             m for m in masteries
             if not (0.40 <= m.mastery_score <= 0.65)
-            and m.topic != focus_topic
         ]
         if exploration_topics:
             exp_topic = random.choice(exploration_topics)
@@ -515,7 +615,6 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
             ]
             if exp_probs:
                 ep = random.choice(exp_probs)
-                # Replace the last recommendation with the exploration pick
                 recommendations[-1] = {
                     "problem_id": ep.id,
                     "title": ep.title,

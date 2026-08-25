@@ -95,6 +95,38 @@ async function fetchSolvedProblemsViaTab() {
 
       if (solved.length === 0) return { ok: true, problems: [] };
 
+      // ── Step 1b: Fetch recent AC submission timestamps to get accurate solve dates ─────────
+      const timestampMap = new Map();
+      try {
+        const subRes = await fetch("https://leetcode.com/graphql/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: `query recentAcSubmissions($username: String!) {
+              recentAcSubmissionList(username: $username, limit: 100) {
+                titleSlug
+                timestamp
+              }
+            }`,
+            variables: { username: apiData.user_name }
+          })
+        });
+        if (subRes.ok) {
+          const subData = await subRes.json();
+          const subList = subData?.data?.recentAcSubmissionList || [];
+          for (const s of subList) {
+            if (s.titleSlug && s.timestamp) {
+              const tsNum = parseInt(s.timestamp, 10);
+              if (!isNaN(tsNum)) {
+                timestampMap.set(s.titleSlug, tsNum);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[DSA Tutor] Submission timestamp fetch notice:", e);
+      }
+
       // ── Step 2: Fetch topic tags via instant bulk GraphQL ────────────────────
       const topicMap = new Map();
       try {
@@ -122,16 +154,18 @@ async function fetchSolvedProblemsViaTab() {
       const problems = [];
 
       for (const { slug, title, difficulty } of solved) {
+        const ts = timestampMap.get(slug) || null;
         if (topicMap.has(slug)) {
           const tags = topicMap.get(slug);
           problems.push({
             problem_id: slug,
             title,
             difficulty,
-            topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
+            topics: tags.length > 0 ? tags : ["Arrays & Hashing"],
+            timestamp: ts
           });
         } else {
-          missingSlugs.push({ slug, title, difficulty });
+          missingSlugs.push({ slug, title, difficulty, timestamp: ts });
         }
       }
 
@@ -141,7 +175,7 @@ async function fetchSolvedProblemsViaTab() {
         for (let i = 0; i < missingSlugs.length; i += BATCH) {
           const chunk = missingSlugs.slice(i, i + BATCH);
           const settled = await Promise.allSettled(
-            chunk.map(async ({ slug, title, difficulty }) => {
+            chunk.map(async ({ slug, title, difficulty, timestamp }) => {
               try {
                 const r = await fetch("https://leetcode.com/graphql/", {
                   method: "POST",
@@ -157,10 +191,11 @@ async function fetchSolvedProblemsViaTab() {
                   problem_id: slug,
                   title,
                   difficulty,
-                  topics: tags.length > 0 ? tags : ["Arrays & Hashing"]
+                  topics: tags.length > 0 ? tags : ["Arrays & Hashing"],
+                  timestamp
                 };
               } catch {
-                return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"] };
+                return { problem_id: slug, title, difficulty, topics: ["Arrays & Hashing"], timestamp };
               }
             })
           );
@@ -168,7 +203,7 @@ async function fetchSolvedProblemsViaTab() {
         }
       }
 
-      return { ok: true, problems };
+      return { ok: true, problems, username: apiData.user_name };
     }
   });
 
@@ -178,7 +213,7 @@ async function fetchSolvedProblemsViaTab() {
       "Script returned no result. Please refresh the LeetCode tab and try again."
     );
   }
-  return result.problems;
+  return { problems: result.problems, username: result.username };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +496,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- LeetCode history fetch (injects into LeetCode tab for same-origin access) ---
   if (request.action === "fetch_leetcode_history") {
     fetchSolvedProblemsViaTab()
-      .then((problems) => sendResponse({ success: true, data: { problems } }))
+      .then(({ problems, username }) => sendResponse({ success: true, data: { problems, username } }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Synced Account persistence ---
+  if (request.action === "get_synced_account") {
+    backendFetch("/sync/account")
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // --- Solved Problems Table ---
+  if (request.action === "get_solved_problems") {
+    backendFetch("/problems/solved")
+      .then((data) => sendResponse({ success: true, data }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
@@ -515,5 +566,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
 
 

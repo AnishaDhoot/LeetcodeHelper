@@ -315,8 +315,8 @@ SEED_DATA = {
               "slug": "scramble-string"
             },
             {
-              "title": "Alien Dictionary",
-              "slug": "alien-dictionary"
+              "title": "Longest Valid Parentheses",
+              "slug": "longest-valid-parentheses"
             },
             {
               "title": "Word Break II",
@@ -1099,8 +1099,8 @@ SEED_DATA = {
           "difficulty": "Hard",
           "questions": [
             {
-              "title": "Alien Dictionary",
-              "slug": "alien-dictionary"
+              "title": "Insert Delete GetRandom O(1) - Duplicates allowed",
+              "slug": "insert-delete-getrandom-o1-duplicates-allowed"
             },
             {
               "title": "Text Justification",
@@ -1533,8 +1533,8 @@ SEED_DATA = {
               "slug": "ugly-number-ii"
             },
             {
-              "title": "Meeting Rooms II",
-              "slug": "meeting-rooms-ii"
+              "title": "Minimum Number of Refueling Stops",
+              "slug": "minimum-number-of-refueling-stops"
             },
             {
               "title": "Single-Threaded CPU",
@@ -1747,8 +1747,8 @@ SEED_DATA = {
               "slug": "reconstruct-itinerary"
             },
             {
-              "title": "Alien Dictionary",
-              "slug": "alien-dictionary"
+              "title": "Cheapest Flights Within K Stops",
+              "slug": "cheapest-flights-within-k-stops"
             },
             {
               "title": "Critical Connections in a Network",
@@ -2302,7 +2302,7 @@ COMPANIES_DATA = {
     {
       "name": "Uber",
       "questions": [
-        { "title": "Meeting Rooms II", "slug": "meeting-rooms-ii", "difficulty": "Medium" },
+        { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" },
         { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" },
         { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" }
       ]
@@ -2352,7 +2352,7 @@ COMPANIES_DATA = {
       "focus_note": "Travel/booking-systems SDE round proxy, not confirmed company-tagged data",
       "questions": [
         { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
-        { "title": "Meeting Rooms II", "slug": "meeting-rooms-ii", "difficulty": "Medium" },
+        { "title": "Merge Intervals", "slug": "merge-intervals", "difficulty": "Medium" },
         { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" }
       ]
     },
@@ -2361,7 +2361,7 @@ COMPANIES_DATA = {
       "focus_note": "Distributed-systems/QE round proxy, not confirmed company-tagged data",
       "questions": [
         { "title": "Implement Trie (Prefix Tree)", "slug": "implement-trie-prefix-tree", "difficulty": "Medium" },
-        { "title": "Design Hit Counter", "slug": "design-hit-counter", "difficulty": "Medium" },
+        { "title": "Design Twitter", "slug": "design-twitter", "difficulty": "Medium" },
         { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" }
       ]
     },
@@ -2392,7 +2392,7 @@ COMPANIES_DATA = {
     {
       "name": "ServiceNow",
       "questions": [
-        { "title": "Design Hit Counter", "slug": "design-hit-counter", "difficulty": "Medium" },
+        { "title": "Design Circular Queue", "slug": "design-circular-queue", "difficulty": "Medium" },
         { "title": "Task Scheduler", "slug": "task-scheduler", "difficulty": "Medium" },
         { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
         { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" },
@@ -2419,7 +2419,7 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Merge k Sorted Lists", "slug": "merge-k-sorted-lists", "difficulty": "Hard" },
         { "title": "Design Circular Deque", "slug": "design-circular-deque", "difficulty": "Medium" },
-        { "title": "Number of Connected Components in an Undirected Graph", "slug": "number-of-connected-components-in-an-undirected-graph", "difficulty": "Medium" },
+        { "title": "Redundant Connection", "slug": "redundant-connection", "difficulty": "Medium" },
         { "title": "Course Schedule", "slug": "course-schedule", "difficulty": "Medium" },
         { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
         { "title": "Number of Islands", "slug": "number-of-islands", "difficulty": "Medium" }
@@ -2493,7 +2493,7 @@ COMPANIES_DATA = {
       "focus_note": "SDE freshers round proxy, not confirmed company-tagged data",
       "questions": [
         { "title": "Find Median from Data Stream", "slug": "find-median-from-data-stream", "difficulty": "Hard" },
-        { "title": "Minimum Cost to Connect Sticks", "slug": "minimum-cost-to-connect-sticks", "difficulty": "Medium" },
+        { "title": "K Closest Points to Origin", "slug": "k-closest-points-to-origin", "difficulty": "Medium" },
         { "title": "Subarray Sum Equals K", "slug": "subarray-sum-equals-k", "difficulty": "Medium" },
         { "title": "LRU Cache", "slug": "lru-cache", "difficulty": "Medium" },
         { "title": "Top K Frequent Elements", "slug": "top-k-frequent-elements", "difficulty": "Medium" },
@@ -2544,7 +2544,7 @@ COMPANIES_DATA = {
       "questions": [
         { "title": "Random Pick with Weight", "slug": "random-pick-with-weight", "difficulty": "Medium" },
         { "title": "Insert Delete GetRandom O(1)", "slug": "insert-delete-getrandom-o1", "difficulty": "Medium" },
-        { "title": "Alien Dictionary", "slug": "alien-dictionary", "difficulty": "Hard" },
+        { "title": "Word Ladder", "slug": "word-ladder", "difficulty": "Hard" },
         { "title": "Two Sum", "slug": "two-sum", "difficulty": "Easy" },
         { "title": "Max Points on a Line", "slug": "max-points-on-a-line", "difficulty": "Hard" }
       ]
@@ -2650,10 +2650,9 @@ def fetch_company_csv_from_github(company_slug):
     url = f"https://raw.githubusercontent.com/snehasishroy/leetcode-companywise-interview-questions/master/{company_slug}/all.csv"
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=1) as response:
             return response.read().decode('utf-8')
     except Exception as e:
-        print(f"[Info] GitHub fetch skipped for {company_slug}: {e}")
         return None
 
 def parse_company_csv(csv_data):

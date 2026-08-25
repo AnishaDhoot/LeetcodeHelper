@@ -145,14 +145,13 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
       const tabs = Array.from(document.querySelectorAll('a, button, [role="tab"], [data-layout-path]'));
       tabs.forEach(el => {
         // NEVER lock anything inside our extension
-        if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root")) return;
+        if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container")) return;
 
         const text = (el.textContent || "").trim().toLowerCase();
         const href = (el.getAttribute("href") || "").toLowerCase();
         const dataPath = (el.getAttribute("data-layout-path") || "").toLowerCase();
         const ariaLabel = (el.getAttribute("aria-label") || "").toLowerCase();
         const idStr = (el.id || "").toLowerCase();
-        const classStr = (typeof el.className === "string" ? el.className : "").toLowerCase();
 
         const isForbiddenTab = (
           (href.includes("/solution") || href.includes("/editorial") || href.includes("/discussion") || href.includes("/community") || href.includes("/submissions")) ||
@@ -171,22 +170,14 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         }
       });
 
-      // If user is currently on an Editorial/Solutions/Discussion/Submissions URL route:
-      if (isForbiddenRoute) {
-        const descTab = Array.from(document.querySelectorAll('a, button, [role="tab"]')).find(el => {
-          const txt = (el.textContent || "").trim().toLowerCase();
-          const href = (el.getAttribute("href") || "").toLowerCase();
-          return (txt.includes("description") || txt.includes("problem") || href.includes("/description")) && !txt.includes("solution") && !txt.includes("editorial") && !txt.includes("submission");
-        });
-        if (descTab) {
-          descTab.click();
-        }
+      // If user is currently directly viewing an Editorial/Solutions/Discussion/Submissions panel:
+      const panelContainer = document.querySelector(
+        "div[data-layout-path*='editorial'], div[data-layout-path*='solution'], div[data-layout-path*='solutions'], div[data-layout-path*='discussion'], div[data-layout-path*='submissions']"
+      );
 
-        const panelContainer = document.querySelector(
-          "div[data-layout-path*='editorial'], div[data-layout-path*='solution'], div[data-layout-path*='solutions'], div[data-layout-path*='discussion']"
-        );
-
-        if (panelContainer && !document.getElementById("dsa-tutor-tab-lock-overlay")) {
+      if ((isForbiddenRoute || panelContainer) && !document.getElementById("dsa-tutor-tab-lock-overlay")) {
+        const mountTarget = panelContainer || document.querySelector(".elfjS, [data-track-load='description_content']")?.parentElement || document.body;
+        if (mountTarget && mountTarget !== document.body) {
           lockOverlay = document.createElement("div");
           lockOverlay.id = "dsa-tutor-tab-lock-overlay";
           Object.assign(lockOverlay.style, {
@@ -195,7 +186,7 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
             left: "0",
             width: "100%",
             height: "100%",
-            backgroundColor: "rgba(14, 14, 16, 0.95)",
+            backgroundColor: "rgba(14, 14, 16, 0.96)",
             backdropFilter: "blur(6px)",
             webkitBackdropFilter: "blur(6px)",
             zIndex: "9999",
@@ -216,12 +207,12 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
               </div>
             </div>
           `;
-          if (getComputedStyle(panelContainer).position === "static") {
-            panelContainer.style.position = "relative";
+          if (getComputedStyle(mountTarget).position === "static") {
+            mountTarget.style.position = "relative";
           }
-          panelContainer.appendChild(lockOverlay);
+          mountTarget.appendChild(lockOverlay);
         }
-      } else {
+      } else if (!isForbiddenRoute && !panelContainer) {
         if (lockOverlay) lockOverlay.remove();
       }
     } else {
@@ -244,9 +235,17 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
 document.addEventListener("click", (e) => {
   if (!window.__dsaTutorAssessmentLocked) return;
 
+  // Check event composedPath to safely detect clicks inside extension Shadow DOM
+  const path = e.composedPath ? e.composedPath() : [];
+  for (const el of path) {
+    if (el && el.id && (el.id === "dsa-tutor-panel-root" || el.id === "dsa-tutor-react-container" || el.id === "dsa-tutor-panel-container")) {
+      return; // Clicks inside extension panel must NEVER be intercepted
+    }
+  }
+
   const target = e.target;
   // Ignore clicks inside our extension panel, monaco editor, console runner, and description text container
-  if (target && target.closest("#dsa-tutor-panel-root, #dsa-tutor-root, .monaco-editor, .CodeMirror, [class*='console-'], [class*='description_content'], .elfjS, [data-track-load='description_content']")) {
+  if (target && target.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, .monaco-editor, .CodeMirror, [class*='console-'], [class*='description_content'], .elfjS, [data-track-load='description_content']")) {
     return;
   }
 
@@ -267,6 +266,7 @@ document.addEventListener("click", (e) => {
     href.includes("/discussions") ||
     href.includes("/comments") ||
     href.includes("/community") ||
+    href.includes("/submissions") ||
     dataPath.includes("editorial") ||
     dataPath.includes("solution") ||
     dataPath.includes("solutions") ||
@@ -275,14 +275,17 @@ document.addEventListener("click", (e) => {
     (ariaLabel.includes("solution") && !ariaLabel.includes("submit")) ||
     ariaLabel.includes("editorial") ||
     ariaLabel.includes("discussion") ||
+    ariaLabel.includes("submission") ||
     idStr.includes("editorial") ||
     idStr.includes("discussion") ||
+    idStr.includes("submission") ||
     (closestNav.getAttribute("role") === "tab" && (
       text.includes("editorial") ||
       text.includes("solution") ||
       text.includes("discussion") ||
       text.includes("comment") ||
-      text.includes("community")
+      text.includes("community") ||
+      text.includes("submission")
     ))
   );
 
@@ -348,23 +351,34 @@ window.addEventListener("message", (event) => {
     try {
       // 1. Click LeetCode's native Reset Code button in DOM to restore official starter template
       const resetCandidates = Array.from(document.querySelectorAll(
-        'button, div[role="button"], span[role="button"], [data-keyup="reset-code"], [data-track-name="reset_code"], [aria-label*="Reset"], [title*="Reset"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"]'
+        'button, div[role="button"], span[role="button"], [data-keyup="reset-code"], [data-track-name="reset_code"], [aria-label*="Reset"], [aria-label*="reset"], [title*="Reset"], [title*="reset"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"]'
       ));
-      const resetBtn = resetCandidates.find(el => {
+      let resetBtn = resetCandidates.find(el => {
+        if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container")) return false;
         const title = (el.getAttribute('title') || el.getAttribute('aria-label') || el.getAttribute('data-cy') || el.getAttribute('data-track-name') || el.textContent || '').toLowerCase();
-        return title.includes('reset') || title.includes('restore') || title.includes('revert');
+        return title.includes('reset') || title.includes('restore') || title.includes('revert') || title.includes('retrieve default');
       });
+
+      // Also search buttons near editor toolbar
+      if (!resetBtn) {
+        const toolbarBtns = Array.from(document.querySelectorAll('div[class*="editor"] button, .monaco-editor button, [class*="tools"] button'));
+        resetBtn = toolbarBtns.find(b => {
+          const html = b.innerHTML.toLowerCase();
+          return html.includes("reset") || html.includes("rotate-ccw") || html.includes("history") || html.includes("restore");
+        });
+      }
 
       if (resetBtn) {
         resetBtn.click();
         
         // Multi-attempt confirmation click to handle variable modal animation delays
-        [100, 250, 450].forEach(delay => {
+        [100, 250, 450, 800].forEach(delay => {
           setTimeout(() => {
-            const confirmBtns = Array.from(document.querySelectorAll('button, div[role="button"], [data-cy="confirm-btn"]'));
+            const confirmBtns = Array.from(document.querySelectorAll('button, div[role="button"], [data-cy="confirm-btn"], [class*="modal"] button'));
             const confirmBtn = confirmBtns.find(b => {
+              if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container")) return false;
               const txt = (b.textContent || '').trim().toLowerCase();
-              return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes';
+              return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code');
             });
             if (confirmBtn) confirmBtn.click();
           }, delay);

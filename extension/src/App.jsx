@@ -72,7 +72,11 @@ export default function App() {
           window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
         }
         if (window.dsaTutor?.resetEditor) {
-          setTimeout(() => window.dsaTutor.resetEditor(), 500);
+          [200, 600, 1200, 2200].forEach(d => {
+            setTimeout(() => {
+              if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+            }, d);
+          });
         }
         if (res.data.problem1?.url) {
           const urlMatch = window.location.href.match(/problems\/([^/]+)/);
@@ -234,6 +238,85 @@ export default function App() {
     chrome.runtime.sendMessage({ action: 'get_weak_pairs' }, (res) => {
       if (res && res.success) setWeakPairs(res.data || []);
     });
+  };
+
+  // Synced Account State (Persistent from backend)
+  const [syncedAccount, setSyncedAccount] = useState({ username: 'LeetCode User', synced_count: 0, topics_count: 0, last_synced: null });
+
+  const fetchSyncedAccount = () => {
+    chrome.runtime.sendMessage({ action: 'get_synced_account' }, (res) => {
+      if (res && res.success && res.data && res.data.account) {
+        setSyncedAccount(res.data.account);
+      }
+    });
+  };
+
+  // Solved Problems Table States & Filters
+  const [solvedProblems, setSolvedProblems] = useState([]);
+  const [loadingSolved, setLoadingSolved] = useState(false);
+  const [solvedSearch, setSolvedSearch] = useState('');
+  const [solvedDifficultyFilter, setSolvedDifficultyFilter] = useState('ALL');
+  const [solvedTopicFilter, setSolvedTopicFilter] = useState('ALL');
+  const [inlineNotes, setInlineNotes] = useState({});
+  const [inlineDiffs, setInlineDiffs] = useState({});
+  const [inlineSaveStatus, setInlineSaveStatus] = useState({});
+
+  const fetchSolvedProblems = () => {
+    setLoadingSolved(true);
+    chrome.runtime.sendMessage({ action: 'get_solved_problems' }, (res) => {
+      setLoadingSolved(false);
+      if (res && res.success && Array.isArray(res.data)) {
+        setSolvedProblems(res.data);
+        const notesMap = {};
+        const diffsMap = {};
+        res.data.forEach(p => {
+          notesMap[p.problem_id] = p.user_notes || '';
+          diffsMap[p.problem_id] = p.personal_difficulty || '';
+        });
+        setInlineNotes(notesMap);
+        setInlineDiffs(diffsMap);
+      }
+    });
+  };
+
+  const saveInlineNote = (problemId, notes, diff, problemTitle) => {
+    const payload = {
+      problem_id: problemId,
+      problem_title: problemTitle || problemId,
+      user_notes: notes !== undefined ? notes : (inlineNotes[problemId] || ''),
+      personal_difficulty: diff !== undefined ? diff : (inlineDiffs[problemId] || '')
+    };
+    chrome.runtime.sendMessage({ action: 'save_problem_notes', payload }, (res) => {
+      setInlineSaveStatus(prev => ({ ...prev, [problemId]: true }));
+      setTimeout(() => {
+        setInlineSaveStatus(prev => ({ ...prev, [problemId]: false }));
+      }, 2000);
+    });
+  };
+
+  // Weekly DSA Log Modal State
+  const [showWeeklyModal, setShowWeeklyModal] = useState(false);
+  const [weeklyData, setWeeklyData] = useState(null);
+  const [loadingWeekly, setLoadingWeekly] = useState(false);
+  const [weeklyCopied, setWeeklyCopied] = useState(false);
+
+  const openWeeklyDigest = () => {
+    setLoadingWeekly(true);
+    setShowWeeklyModal(true);
+    chrome.runtime.sendMessage({ action: 'get_weekly_journal' }, (res) => {
+      setLoadingWeekly(false);
+      if (res && res.success && res.data) {
+        setWeeklyData(res.data);
+      }
+    });
+  };
+
+  const copyWeeklyMarkdown = () => {
+    if (weeklyData?.markdown_text) {
+      navigator.clipboard.writeText(weeklyData.markdown_text);
+      setWeeklyCopied(true);
+      setTimeout(() => setWeeklyCopied(false), 2500);
+    }
   };
 
   // CSV Export state
@@ -587,12 +670,13 @@ export default function App() {
         return;
       }
       const problems = fetchRes.data?.problems || [];
+      const username = fetchRes.data?.username || 'LeetCode User';
       if (problems.length === 0) {
         setSyncStatus({ phase: 'done', message: 'No solved problems found. Solve a few on LeetCode first!', counts: { synced: 0, topics: 0 } });
         return;
       }
-      setSyncStatus({ phase: 'syncing', message: `Importing ${problems.length} solved problem(s) into your tutor…` });
-      chrome.runtime.sendMessage({ action: 'sync_solved', payload: { problems } }, (syncRes) => {
+      setSyncStatus({ phase: 'syncing', message: `Importing ${problems.length} solved problem(s) into your tutor for ${username}…` });
+      chrome.runtime.sendMessage({ action: 'sync_solved', payload: { problems, username } }, (syncRes) => {
         if (!syncRes || !syncRes.success) {
           setSyncStatus({ phase: 'error', message: syncRes?.error || 'Backend sync failed.' });
           return;
@@ -603,12 +687,14 @@ export default function App() {
           message: syncRes.data.message,
           counts: { synced, topics, new_topics, fetched: problems.length }
         });
-        // Refresh mastery, focus, analysis, and recommendations.
+        // Refresh mastery, focus, analysis, recommendations, account, and solved problems table.
         fetchMastery();
         fetchFocus();
         fetchAnalysis();
         fetchRecommendation();
         fetchStreak();
+        fetchSyncedAccount();
+        fetchSolvedProblems();
       });
     });
   };
@@ -700,15 +786,25 @@ export default function App() {
             clearCurrentCoachState();
             fetchProblemDetails(identity.problemId);
 
-            // If active badge test is running and moving to a new question, reset editor once
+            // If active badge test is running and moving to a new question, reset editor
             if (activeTest && window.dsaTutor?.resetEditor) {
-              setTimeout(() => window.dsaTutor.resetEditor(), 500);
+              [200, 600, 1200, 2200].forEach(d => {
+                setTimeout(() => {
+                  if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+                }, d);
+              });
             }
 
             // If active mock interview is running and strategy is not submitted, lock & reset editor
             if (isMockMode && mockSession && !mockApproachSubmitted) {
               if (window.dsaTutor?.setEditorReadOnly) window.dsaTutor.setEditorReadOnly(true);
-              if (window.dsaTutor?.resetEditor) setTimeout(() => window.dsaTutor.resetEditor(), 500);
+              if (window.dsaTutor?.resetEditor) {
+                [200, 600, 1200, 2200].forEach(d => {
+                  setTimeout(() => {
+                    if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+                  }, d);
+                });
+              }
             }
           }
         }
@@ -827,6 +923,8 @@ export default function App() {
     fetchActiveTest();
     fetchAiQuota();
     fetchActiveMock();
+    fetchSyncedAccount();
+    fetchSolvedProblems();
 
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
@@ -1085,6 +1183,22 @@ export default function App() {
                   <path d="m19 9-5 5-4-4-3 3" />
                 </svg>
                 Mastery
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 'solved' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('solved');
+                  fetchSolvedProblems();
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/>
+                  <line x1="16" y1="17" x2="8" y2="17"/>
+                  <polyline points="10 9 9 9 8 9"/>
+                </svg>
+                Solved
               </button>
               <button
                 className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
@@ -2036,13 +2150,307 @@ export default function App() {
           </div>
         )}
 
+        {/* TAB: SOLVED PROBLEMS SPREADSHEET & TRACKER */}
+        {!activeTest && !isMockMode && activeTab === 'solved' && (
+          <div className="solved-tracker-container">
+            {/* Top Highlighted Summary Banner */}
+            <div className="solved-header-hero">
+              <div className="solved-hero-top">
+                <div>
+                  <h4 className="solved-hero-title">
+                    <span className="solved-hero-icon">📊</span> Solved Problems Spreadsheet
+                  </h4>
+                  <div className="solved-hero-subtitle">
+                    Account: <strong style={{ color: '#60a5fa' }}>{syncedAccount.username || 'LeetCode User'}</strong> • {solvedProblems.length} Solved Questions Synced & Stored
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <button
+                    className="coach-btn secondary"
+                    style={{ padding: '5px 10px', fontSize: '11px', borderRadius: '6px' }}
+                    onClick={openWeeklyDigest}
+                    title="View Weekly AI Digest & Insights"
+                  >
+                    ✨ AI Weekly Log
+                  </button>
+                  <button
+                    className="coach-btn"
+                    style={{ padding: '5px 10px', fontSize: '11px', borderRadius: '6px' }}
+                    onClick={exportSolvedCsv}
+                    disabled={exportingCsv}
+                    title="Export CSV spreadsheet"
+                  >
+                    📥 {exportingCsv ? 'Exporting…' : 'Export CSV'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Metric Badges */}
+              <div className="solved-hero-metrics">
+                <div className="metric-pill">
+                  <span className="metric-label">Total Solved</span>
+                  <span className="metric-val">{solvedProblems.length}</span>
+                </div>
+                <div className="metric-pill">
+                  <span className="metric-label" style={{ color: '#4ade80' }}>Easy</span>
+                  <span className="metric-val" style={{ color: '#4ade80' }}>
+                    {solvedProblems.filter(p => p.difficulty?.toLowerCase() === 'easy').length}
+                  </span>
+                </div>
+                <div className="metric-pill">
+                  <span className="metric-label" style={{ color: '#fbbf24' }}>Medium</span>
+                  <span className="metric-val" style={{ color: '#fbbf24' }}>
+                    {solvedProblems.filter(p => p.difficulty?.toLowerCase() === 'medium').length}
+                  </span>
+                </div>
+                <div className="metric-pill">
+                  <span className="metric-label" style={{ color: '#f87171' }}>Hard</span>
+                  <span className="metric-val" style={{ color: '#f87171' }}>
+                    {solvedProblems.filter(p => p.difficulty?.toLowerCase() === 'hard').length}
+                  </span>
+                </div>
+                <div className="metric-pill">
+                  <span className="metric-label" style={{ color: '#a78bfa' }}>Reviews Due</span>
+                  <span className="metric-val" style={{ color: '#a78bfa' }}>
+                    {solvedProblems.filter(p => p.review_status?.toLowerCase().includes('today') || p.review_status?.toLowerCase().includes('due')).length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Filters Row */}
+              <div className="solved-filters-row">
+                <div style={{ flex: 2, position: 'relative' }}>
+                  <input
+                    type="text"
+                    className="solved-search-input"
+                    placeholder="🔍 Search problems by title or slug..."
+                    value={solvedSearch}
+                    onChange={(e) => setSolvedSearch(e.target.value)}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <select
+                    className="solved-select-filter"
+                    value={solvedDifficultyFilter}
+                    onChange={(e) => setSolvedDifficultyFilter(e.target.value)}
+                  >
+                    <option value="ALL">All Difficulties</option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                  </select>
+                </div>
+                <div style={{ flex: 1.2 }}>
+                  <select
+                    className="solved-select-filter"
+                    value={solvedTopicFilter}
+                    onChange={(e) => setSolvedTopicFilter(e.target.value)}
+                  >
+                    <option value="ALL">All Topics</option>
+                    {Array.from(new Set(solvedProblems.flatMap(p => (p.topics || '').split(',').map(t => t.trim()).filter(Boolean)))).sort().map(topic => (
+                      <option key={topic} value={topic}>{topic}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Table Content */}
+            {loadingSolved ? (
+              <div className="loading-container">
+                <div className="spinner" />
+                <p style={{ margin: 0, fontSize: '12px', color: '#71717a' }}>Loading solved problems table…</p>
+              </div>
+            ) : (
+              (() => {
+                const filtered = solvedProblems.filter(p => {
+                  const matchesSearch = !solvedSearch.trim() || 
+                    p.title.toLowerCase().includes(solvedSearch.toLowerCase()) || 
+                    p.problem_id.toLowerCase().includes(solvedSearch.toLowerCase());
+                  const matchesDiff = solvedDifficultyFilter === 'ALL' || p.difficulty.toLowerCase() === solvedDifficultyFilter.toLowerCase();
+                  const matchesTopic = solvedTopicFilter === 'ALL' || (p.topics && p.topics.includes(solvedTopicFilter));
+                  return matchesSearch && matchesDiff && matchesTopic;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="empty-state" style={{ padding: '24px 12px' }}>
+                      {solvedProblems.length === 0 ? (
+                        <>
+                          <div style={{ fontSize: '24px', marginBottom: '8px' }}>📂</div>
+                          <div>No solved problems found in database.</div>
+                          <button
+                            className="coach-btn"
+                            style={{ marginTop: '12px', width: 'auto', padding: '6px 14px' }}
+                            onClick={() => {
+                              setActiveTab('history');
+                              runHistorySync();
+                            }}
+                          >
+                            🔄 Sync LeetCode History Now
+                          </button>
+                        </>
+                      ) : (
+                        'No problems match your current search/filter.'
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="solved-table-wrapper">
+                    <table className="solved-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '38%' }}>Problem & Topics</th>
+                          <th style={{ width: '12%' }}>Diff</th>
+                          <th style={{ width: '14%' }}>Date Solved</th>
+                          <th style={{ width: '14%' }}>Review Due</th>
+                          <th style={{ width: '22%' }}>My Notes & Rating</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((prob, idx) => {
+                          const topicsList = prob.topics ? prob.topics.split(',').map(t => t.trim()).filter(Boolean) : [];
+                          const isSaving = inlineSaveStatus[prob.problem_id];
+                          return (
+                            <tr key={prob.problem_id}>
+                              <td>
+                                <div className="prob-title-cell">
+                                  <span className="prob-idx">#{idx + 1}</span>
+                                  <a
+                                    href={prob.url}
+                                    target="_self"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      window.location.href = prob.url;
+                                    }}
+                                    className="prob-link"
+                                    title={`Open ${prob.title} on LeetCode`}
+                                  >
+                                    {prob.title}
+                                  </a>
+                                </div>
+                                <div className="prob-tags-cell">
+                                  {prob.companies && (
+                                    <span className="prob-company-chip">🏢 {prob.companies}</span>
+                                  )}
+                                  {topicsList.slice(0, 2).map(t => (
+                                    <span key={t} className="prob-topic-chip">{t}</span>
+                                  ))}
+                                  {topicsList.length > 2 && (
+                                    <span className="prob-topic-chip">+{topicsList.length - 2}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`difficulty-badge ${prob.difficulty.toLowerCase()}`} style={{ fontSize: '10px', padding: '2px 5px' }}>
+                                  {prob.difficulty}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '11px', color: '#a1a1aa', whiteSpace: 'nowrap' }}>
+                                📅 {prob.date_solved}
+                              </td>
+                              <td>
+                                <span className={`table-review-pill ${prob.review_status?.toLowerCase().includes('due') || prob.review_status?.toLowerCase().includes('today') ? 'urgent' : ''}`}>
+                                  {prob.review_status}
+                                </span>
+                                <div style={{ fontSize: '9px', color: '#71717a', marginTop: '2px' }}>
+                                  {prob.review_schedule}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="inline-notes-container">
+                                  <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '4px' }}>
+                                    <select
+                                      className="inline-diff-select"
+                                      value={inlineDiffs[prob.problem_id] !== undefined ? inlineDiffs[prob.problem_id] : (prob.personal_difficulty || '')}
+                                      onChange={(e) => {
+                                        const newDiff = e.target.value;
+                                        setInlineDiffs(prev => ({ ...prev, [prob.problem_id]: newDiff }));
+                                        saveInlineNote(prob.problem_id, inlineNotes[prob.problem_id], newDiff, prob.title);
+                                      }}
+                                    >
+                                      <option value="">Flag: Unrated</option>
+                                      <option value="Hard for me">🔥 Hard for me</option>
+                                      <option value="Tricky Edge Cases">⚠️ Tricky Edge Cases</option>
+                                      <option value="Medium">⚡ Medium</option>
+                                      <option value="Easy">✅ Easy</option>
+                                    </select>
+                                    {isSaving && (
+                                      <span style={{ fontSize: '9px', color: '#4ade80', fontWeight: 'bold' }}>✓ Saved</span>
+                                    )}
+                                  </div>
+                                  <textarea
+                                    className="inline-note-input"
+                                    rows={2}
+                                    placeholder="Add revision note..."
+                                    value={inlineNotes[prob.problem_id] !== undefined ? inlineNotes[prob.problem_id] : (prob.user_notes || '')}
+                                    onChange={(e) => {
+                                      const newNote = e.target.value;
+                                      setInlineNotes(prev => ({ ...prev, [prob.problem_id]: newNote }));
+                                      saveInlineNote(prob.problem_id, newNote, inlineDiffs[prob.problem_id], prob.title);
+                                    }}
+                                  />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
+
         {/* TAB 4: HISTORY SYNC */}
         {!activeTest && !isMockMode && activeTab === 'history' && (
           <div>
-            <h4 className="section-heading">LeetCode History Sync</h4>
+            <h4 className="section-heading">LeetCode History Sync & Account</h4>
             <p className="coach-intro">
-              Synchronize your historical solved problems from LeetCode to map your topic mastery levels.
+              Synchronize your historical solved problems from LeetCode to map topic mastery, seed spaced repetition, and populate your problem table.
             </p>
+
+            {/* Persistent Synced Account Card */}
+            <div className="info-section alt-section" style={{ marginBottom: '14px', background: '#18181b', border: '1px solid #27272a', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: '600', color: '#f4f4f5', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>👤</span> {syncedAccount.username || 'LeetCode User'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#a1a1aa', marginTop: '3px' }}>
+                    <strong>{syncedAccount.synced_count || solvedProblems.length || 0}</strong> Solved Problems Stored Persistently in Database
+                  </div>
+                  {syncedAccount.last_synced && (
+                    <div style={{ fontSize: '10px', color: '#71717a', marginTop: '2px' }}>
+                      Last Synced: {syncedAccount.last_synced}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <button
+                    className="coach-btn"
+                    style={{ padding: '5px 10px', fontSize: '11px', width: 'auto' }}
+                    onClick={() => {
+                      setActiveTab('solved');
+                      fetchSolvedProblems();
+                    }}
+                  >
+                    📊 Open Solved Table
+                  </button>
+                  <button
+                    className="coach-btn secondary"
+                    style={{ padding: '5px 10px', fontSize: '11px', width: 'auto' }}
+                    onClick={openWeeklyDigest}
+                  >
+                    ✨ AI Weekly Log
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <button
               className={`coach-btn ${syncStatus && syncStatus.phase !== 'done' && syncStatus.phase !== 'error' ? 'loading' : ''}`}
@@ -2055,25 +2463,24 @@ export default function App() {
                 : 'Sync All LeetCode History'}
             </button>
 
-            {/* Weekly Journal Export (Tier 5.1) */}
-            <button
-              className="coach-btn secondary"
-              style={{ marginTop: '10px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              onClick={exportWeeklyJournal}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Export Weekly Mistake Journal (.md)
-            </button>
-
-            {/* Mock Interview Report Export */}
-            <button
-              className="coach-btn secondary"
-              style={{ marginTop: '10px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              onClick={exportMockReport}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
-              Export Mock Interview Report (.md)
-            </button>
+            {/* Weekly Journal & Mock Reports */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+              <button
+                className="coach-btn secondary"
+                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '11px' }}
+                onClick={openWeeklyDigest}
+              >
+                <span>✨</span> View AI Weekly Log
+              </button>
+              <button
+                className="coach-btn secondary"
+                style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '11px' }}
+                onClick={exportMockReport}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+                Mock Report (.md)
+              </button>
+            </div>
 
             {/* Solved Problems Spreadsheet Export (.csv) */}
             <div className="info-section alt-section" style={{ marginTop: '12px', background: '#18181b', border: '1px solid #27272a', padding: '10px 12px', borderRadius: '8px' }}>
@@ -2202,6 +2609,102 @@ export default function App() {
       </>
     )}
   </div>
+
+      {/* AI Weekly DSA Digest Modal */}
+      {showWeeklyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '520px', maxHeight: '85vh', overflowY: 'auto', padding: '20px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #27272a', paddingBottom: '12px', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>✨</span> Weekly DSA Digest & AI Insights
+                </h3>
+                <div style={{ fontSize: '11px', color: '#a1a1aa', marginTop: '2px' }}>
+                  {weeklyData ? `Period: ${weeklyData.period_start} to ${weeklyData.period_end}` : 'Generating learning synthesis…'}
+                </div>
+              </div>
+              <button onClick={() => setShowWeeklyModal(false)} style={{ background: 'transparent', border: 'none', color: '#a1a1aa', cursor: 'pointer', fontSize: '18px' }}>✕</button>
+            </div>
+
+            {loadingWeekly ? (
+              <div className="loading-container" style={{ padding: '30px 0' }}>
+                <div className="spinner" />
+                <p style={{ margin: 0, fontSize: '12px', color: '#a1a1aa' }}>Analyzing weekly patterns & generating AI takeaways…</p>
+              </div>
+            ) : weeklyData ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Stats Summary Bar */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ flex: 1, background: '#18181b', padding: '8px 10px', borderRadius: '8px', border: '1px solid #27272a', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase' }}>Solved This Week</div>
+                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#4ade80', marginTop: '2px' }}>{weeklyData.total_solved}</div>
+                  </div>
+                  <div style={{ flex: 1, background: '#18181b', padding: '8px 10px', borderRadius: '8px', border: '1px solid #27272a', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: '#a1a1aa', textTransform: 'uppercase' }}>Total Attempts</div>
+                    <div style={{ fontSize: '18px', fontWeight: '800', color: '#60a5fa', marginTop: '2px' }}>{weeklyData.total_attempts}</div>
+                  </div>
+                </div>
+
+                {/* 1. AI Growth Summary Card */}
+                {weeklyData.ai_growth_summary && (
+                  <div style={{ background: '#09090b', border: '1px solid #3b82f644', borderLeft: '4px solid #3b82f6', borderRadius: '8px', padding: '12px 14px' }}>
+                    <div style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>🤖</span> AI Growth Reflection & Progress
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#e4e4e7', lineHeight: '1.5' }}>
+                      {weeklyData.ai_growth_summary}
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Core Concepts Mastered */}
+                {weeklyData.concepts_learned && weeklyData.concepts_learned.length > 0 && (
+                  <div style={{ background: '#18181b', border: '1px solid #27272a', borderRadius: '8px', padding: '12px 14px' }}>
+                    <div style={{ fontSize: '11px', color: '#a78bfa', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>🧠</span> Core Concepts & Patterns Strengthened
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '12px', color: '#d4d4d8', lineHeight: '1.5' }}>
+                      {weeklyData.concepts_learned.map((c, i) => (
+                        <li key={i} style={{ marginBottom: '4px' }}>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* 3. DSA Pattern Spotlight & Trivia */}
+                {weeklyData.pattern_spotlight && (
+                  <div style={{ background: '#f59e0b11', border: '1px solid #f59e0b44', borderLeft: '4px solid #f59e0b', borderRadius: '8px', padding: '12px 14px' }}>
+                    <div style={{ fontSize: '11px', color: '#fbbf24', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>💡</span> Pattern Spotlight & Pro-Tip of the Week
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#fde68a', lineHeight: '1.5' }}>
+                      {weeklyData.pattern_spotlight}
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal Footer Actions */}
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                  <button
+                    className="coach-btn secondary"
+                    style={{ flex: 1, padding: '8px 12px', fontSize: '12px' }}
+                    onClick={copyWeeklyMarkdown}
+                  >
+                    {weeklyCopied ? '✓ Copied Markdown!' : '📋 Copy Markdown'}
+                  </button>
+                  <button
+                    className="coach-btn"
+                    style={{ flex: 1, padding: '8px 12px', fontSize: '12px' }}
+                    onClick={exportWeeklyJournal}
+                  >
+                    📥 Download .md
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       {/* Badge Test Submit Confirmation Modal */}
       {showBadgeSubmitConfirm && activeTest && (

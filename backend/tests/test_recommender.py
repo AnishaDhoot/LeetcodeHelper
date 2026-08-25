@@ -1,7 +1,7 @@
 import pytest
 from datetime import timedelta
-from backend.database import Base, engine, SessionLocal
-from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition
+from backend.database import SessionLocal
+from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition, UserConfig, BadgeTest
 from backend.recommender import (
     get_next_problem,
     update_mastery_on_submission,
@@ -12,9 +12,11 @@ from backend.recommender import (
 
 @pytest.fixture(autouse=True)
 def clean_db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
+    db.query(BadgeTest).delete()
+    db.query(Attempt).delete()
+    db.query(UserConfig).delete()
+    db.query(SpacedRepetition).delete()
     
     # Seed test problems
     p1 = Problem(id="two-sum", title="Two Sum", url="https://leetcode.com/problems/two-sum", difficulty="Easy", topics="Arrays & Hashing", is_premium=False)
@@ -24,13 +26,20 @@ def clean_db():
     p5 = Problem(id="climbing-stairs", title="Climbing Stairs", url="https://leetcode.com/problems/climbing-stairs", difficulty="Easy", topics="Dynamic Programming", is_premium=False)
     p6 = Problem(id="coin-change", title="Coin Change", url="https://leetcode.com/problems/coin-change", difficulty="Medium", topics="Dynamic Programming", is_premium=False)
     
-    db.add_all([p1, p2, p3, p4, p5, p6])
+    db.merge(p1)
+    db.merge(p2)
+    db.merge(p3)
+    db.merge(p4)
+    db.merge(p5)
+    db.merge(p6)
     
     # Seed topic masteries
     tm1 = TopicMastery(topic="Arrays & Hashing", level=1, rating=1040.0, attempts_count=5, success_count=4)
     tm2 = TopicMastery(topic="Two Pointers", level=0, rating=800.0, attempts_count=2, success_count=0)
     tm3 = TopicMastery(topic="Dynamic Programming", level=0, rating=800.0, attempts_count=1, success_count=0)
-    db.add_all([tm1, tm2, tm3])
+    db.merge(tm1)
+    db.merge(tm2)
+    db.merge(tm3)
     
     db.commit()
     yield db

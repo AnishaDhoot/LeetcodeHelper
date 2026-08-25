@@ -10,6 +10,9 @@ client = TestClient(app)
 def test_db_setup():
     db = SessionLocal()
     try:
+        if db.query(Problem).count() == 0:
+            from backend.seed import seed_db
+            seed_db()
         # Clean up any leftover badge tests from previous runs to prevent 403 locks
         db.query(BadgeTest).delete()
         # Clean up leftover mock sessions
@@ -18,13 +21,13 @@ def test_db_setup():
         db.query(UserConfig).filter(UserConfig.key.like("ai_limit_%")).delete()
         db.commit()
 
-        problems = db.query(Problem).all()
-        print(f"Verified: found {len(problems)} problems in DB.")
-        assert len(problems) > 0, "No problems found in DB."
+        problems_count = db.query(Problem).count()
+        print(f"Verified: found {problems_count} problems in DB.")
+        assert problems_count > 0, "No problems found in DB."
         
-        masteries = db.query(TopicMastery).all()
-        print(f"Verified: found {len(masteries)} topics in DB.")
-        assert len(masteries) > 0, "No topics found in DB."
+        masteries_count = db.query(TopicMastery).count()
+        print(f"Verified: found {masteries_count} topics in DB.")
+        assert masteries_count > 0, "No topics found in DB."
     finally:
         db.close()
 
@@ -388,7 +391,13 @@ def test_mock_interview():
     assert quota_data["limit"] == AI_DAILY_QUOTA_LIMIT
 
 
-def test_weekly_journal():
+@patch("backend.main.generate_weekly_ai_insights")
+def test_weekly_journal(mock_ai):
+    mock_ai.return_value = {
+        "ai_growth_summary": "Solid weekly consistency!",
+        "concepts_learned": ["Arrays", "Two Pointers"],
+        "pattern_spotlight": "Pro-tip of the week"
+    }
     response = client.get("/journal/weekly")
     assert response.status_code == 200
     data = response.json()

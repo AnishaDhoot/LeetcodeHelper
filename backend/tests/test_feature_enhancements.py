@@ -8,15 +8,20 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def setup_test_db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
+    db.query(BadgeTest).delete()
+    db.query(Attempt).delete()
+    db.query(UserConfig).delete()
     
     # 1. Populate test problems with company tags
     p1 = Problem(id="two-sum", title="Two Sum", url="https://leetcode.com/problems/two-sum", difficulty="Easy", topics="Arrays", companies="Google, Meta", is_premium=False)
+    p1_2 = Problem(id="best-time-to-buy-and-sell-stock", title="Best Time to Buy and Sell Stock", url="https://leetcode.com/problems/best-time-to-buy-and-sell-stock", difficulty="Easy", topics="Arrays", companies="Google", is_premium=False)
     p2 = Problem(id="3sum", title="3Sum", url="https://leetcode.com/problems/3sum", difficulty="Medium", topics="Two Pointers", companies="Amazon", is_premium=False)
     p3 = Problem(id="lru-cache", title="LRU Cache", url="https://leetcode.com/problems/lru-cache", difficulty="Medium", topics="Hash Table", companies="Google, Amazon", is_premium=False)
-    db.add_all([p1, p2, p3])
+    db.merge(p1)
+    db.merge(p1_2)
+    db.merge(p2)
+    db.merge(p3)
 
     # 2. Add attempts (1 solved, 1 failed)
     now = get_utc_now()
@@ -25,8 +30,8 @@ def setup_test_db():
     db.add_all([att_solved, att_failed])
 
     db.commit()
-    yield db
     db.close()
+    yield
 
 def test_company_filter_in_recommendations():
     """Verifies /problems/next filters problems by company query parameter."""
@@ -74,14 +79,21 @@ def test_badge_test_submit_lifecycle():
 
 def test_weekly_journal_includes_solved_dates():
     """Verifies /journal/weekly markdown output contains Solved Problems with dates."""
-    res = client.get("/journal/weekly")
-    assert res.status_code == 200
-    data = res.json()
-    assert "markdown_text" in data
-    md = data["markdown_text"]
-    assert "Solved Problems Journal" in md
-    assert "Two Sum" in md
-    assert "Solved on" in md
+    from unittest.mock import patch
+    with patch("backend.main.generate_weekly_ai_insights") as mock_ai:
+        mock_ai.return_value = {
+            "ai_growth_summary": "Great weekly consistency!",
+            "concepts_learned": ["Two Pointers", "Hashing"],
+            "pattern_spotlight": "Pro-tip of the week"
+        }
+        res = client.get("/journal/weekly")
+        assert res.status_code == 200
+        data = res.json()
+        assert "markdown_text" in data
+        md = data["markdown_text"]
+        assert "Solved Problems Journal" in md
+        assert "Two Sum" in md
+        assert "Solved on" in md
 
 def test_ai_quota_default_is_50():
     """Verifies default AI daily quota limit is set to 50."""

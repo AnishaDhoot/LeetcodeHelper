@@ -35,7 +35,7 @@ from backend.models import (
     ComplexityEstimateRequest, ComplexityRevealRequest, ComplexityRevealResponse,
     StreakResponse, WeeklyJournalResponse,
     MockStartRequest, MockStartResponse, MockApproachRequest, MockSubmitRequest,
-    WeakPairItem
+    WeakPairItem, SolvedProblemTableItem
 )
 from backend.agent import (
     generate_diagnosis,
@@ -44,7 +44,8 @@ from backend.agent import (
     generate_levelled_hint,
     analyze_edge_cases,
     answer_custom_question,
-    generate_explain_back_check
+    generate_explain_back_check,
+    generate_weekly_ai_insights
 )
 from backend.recommender import (
     update_mastery_on_submission,
@@ -194,6 +195,12 @@ def _ensure_schema():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE badge_tests ADD COLUMN time_limit_seconds INTEGER DEFAULT 5400 NOT NULL"))
 
+    # -- Sync premium status for all known premium problem slugs --
+    if "problems" in table_names and KNOWN_PREMIUM_SLUGS:
+        with engine.begin() as conn:
+            slugs_str = ",".join([f"'{s}'" for s in KNOWN_PREMIUM_SLUGS])
+            conn.execute(text(f"UPDATE problems SET is_premium = 1 WHERE id IN ({slugs_str})"))
+
     # Check if database is empty and warn developer
     from backend.database import SessionLocal
     db_conn = SessionLocal()
@@ -204,6 +211,38 @@ def _ensure_schema():
         print(f"Database check warning: {e}")
     finally:
         db_conn.close()
+
+
+KNOWN_PREMIUM_SLUGS = {
+    "meeting-rooms", "meeting-rooms-ii", "alien-dictionary", "walls-and-gates",
+    "graph-valid-tree", "number-of-connected-components-in-an-undirected-graph",
+    "encode-and-decode-strings", "inorder-successor-in-bst", "inorder-successor-in-bst-ii",
+    "paint-house", "paint-house-ii", "paint-fence", "bomb-enemy", "design-tic-tac-toe",
+    "design-hit-counter", "design-search-autocomplete-system", "design-in-memory-file-system",
+    "find-leaves-of-binary-tree", "binary-tree-vertical-order-traversal", "shortest-word-distance",
+    "shortest-word-distance-ii", "shortest-word-distance-iii", "two-sum-iii-data-structure-design",
+    "two-sum-bsts", "two-sum-less-than-k", "group-shifted-strings", "count-univalue-subtrees",
+    "factor-combinations", "verify-preorder-sequence-in-binary-search-tree", "flatten-2d-vector",
+    "sparse-matrix-multiplication", "binary-tree-longest-consecutive-sequence",
+    "binary-tree-longest-consecutive-sequence-ii", "generalized-abbreviation",
+    "maximum-size-subarray-sum-equals-k", "nested-list-weight-sum", "nested-list-weight-sum-ii",
+    "longest-substring-with-at-most-k-distinct-characters",
+    "longest-substring-with-at-most-two-distinct-characters", "range-addition",
+    "line-reflection", "plus-one-linked-list", "sentence-screen-fitting", "sequence-reconstruction",
+    "ternary-expression-parser", "optimal-account-balancing", "kill-process",
+    "split-array-with-equal-sum", "boundary-of-binary-tree", "lonely-pixel-i", "lonely-pixel-ii",
+    "output-contest-matches", "encode-string-with-shortest-length", "bold-words-in-string",
+    "pour-water", "candy-crush", "closest-binary-search-tree-value", "closest-binary-search-tree-value-ii",
+    "valid-word-square", "word-squares", "maximum-average-subarray-ii", "design-compressed-string-iterator",
+    "add-bold-tag-in-string", "design-snake-game", "design-phone-directory", "logger-rate-limiter",
+    "android-unlock-patterns", "strobogrammatic-number", "strobogrammatic-number-ii",
+    "strobogrammatic-number-iii", "wiggle-sort", "palindrome-permutation", "palindrome-permutation-ii",
+    "read-n-characters-given-read4", "read-n-characters-given-read4-ii-call-multiple-times",
+    "one-edit-distance", "missing-ranges", "reverse-words-in-a-string-ii", "rearrange-string-k-distance-apart",
+    "max-consecutive-ones-ii", "dot-product-of-two-sparse-vectors", "binary-search-tree-iterator-ii",
+    "find-root-of-n-ary-tree", "buildings-with-an-ocean-view", "minimum-cost-to-connect-sticks",
+    "leftmost-column-with-at-least-a-one", "design-excel-sum-formula", "design-log-storage-system"
+}
 
 
 _ensure_schema()
@@ -648,9 +687,10 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         if t["name"].lower() == req.topic.lower():
             for b in t.get("badges", []):
                 if b["level"] == target_level:
-                    slugs = [q["slug"] for q in b.get("questions", [])]
+                    slugs = [q["slug"] for q in b.get("questions", []) if q["slug"] not in KNOWN_PREMIUM_SLUGS]
                     curated_candidates = db.query(Problem).filter(
                         Problem.id.in_(slugs),
+                        Problem.id.notin_(KNOWN_PREMIUM_SLUGS),
                         Problem.is_premium == False
                     ).all()
                     break
@@ -663,11 +703,13 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         topic_clean = req.topic.replace("Arrays & Hashing", "Array").replace("Trees & BST", "Tree").replace("Graphs", "Graph")
         raw_problems = db.query(Problem).filter(
             Problem.topics.like(f"%{topic_clean}%"),
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS),
             Problem.is_premium == False
         ).all()
         if not raw_problems:
             raw_problems = db.query(Problem).filter(
                 Problem.topics.like(f"%{req.topic}%"),
+                Problem.id.notin_(KNOWN_PREMIUM_SLUGS),
                 Problem.is_premium == False
             ).all()
 
@@ -682,13 +724,11 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         else:
             targets = ["Hard"]
 
-        candidates = [p for p in problems if p.difficulty in targets and not p.is_premium]
+        candidates = [p for p in problems if p.difficulty in targets and not p.is_premium and p.id not in KNOWN_PREMIUM_SLUGS]
         if len(candidates) < 2:
-            candidates = [p for p in problems if not p.is_premium]
+            candidates = [p for p in problems if not p.is_premium and p.id not in KNOWN_PREMIUM_SLUGS]
         if len(candidates) < 2:
-            candidates = filter_problems_for_topic(db.query(Problem).filter(Problem.is_premium == False).all(), req.topic)
-            candidates = [p for p in candidates if not p.is_premium]
-
+            candidates = db.query(Problem).filter(Problem.is_premium == False, Problem.id.notin_(KNOWN_PREMIUM_SLUGS)).all()
         selected = random.sample(candidates, 2) if len(candidates) >= 2 else candidates[:2]
 
     if len(selected) < 2:
@@ -919,13 +959,10 @@ def ask_help(req: AskHelpRequest, db: Session = Depends(get_db)):
 def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
     """
     Imports already-solved LeetCode problems from the user's history.
-
-    For each problem: upserts the Problem (marked is_solved=True) and tallies
-    per-topic solved counts. For each topic touched, seeds TopicMastery:
-    attempts_count = solved_count and mastery_score from the log formula — but
-    ONLY when solved_count > existing attempts_count, so live tracking data is
-    never overwritten. success_rate is left at 0 (we have no real attempts yet).
+    Preserves actual solve timestamps when provided, associates synced account,
+    and updates TopicMastery baselines and Spaced Repetition queues.
     """
+    import json
     topics_seen = set()
     solved_per_topic = Counter()
 
@@ -943,7 +980,6 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
     } if prob_ids else set()
 
     now_utc = get_utc_now()
-    due_utc = now_utc + timedelta(days=3)
 
     # 1. Upsert each problem (mark solved) and collect per-topic solved counts.
     for prob in req.problems:
@@ -952,15 +988,32 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             topics_seen.add(t)
             solved_per_topic[t] += 1
 
+        # Determine actual solve datetime if provided
+        actual_solve_dt = None
+        if prob.timestamp:
+            try:
+                actual_solve_dt = datetime.fromtimestamp(prob.timestamp, tz=timezone.utc).replace(tzinfo=None)
+            except Exception:
+                actual_solve_dt = None
+        elif prob.solved_at:
+            try:
+                actual_solve_dt = datetime.fromisoformat(prob.solved_at.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                actual_solve_dt = None
+
+        if not actual_solve_dt:
+            actual_solve_dt = now_utc
+
         url = f"https://leetcode.com/problems/{prob.problem_id}/"
         problem = existing_problems.get(prob.problem_id)
         if problem:
-            # Refresh metadata for a previously seen problem
             problem.title = prob.title or problem.title
             problem.url = url
             problem.difficulty = prob.difficulty or problem.difficulty
             problem.topics = topics_csv
             problem.is_solved = True
+            if prob.company and not problem.companies:
+                problem.companies = prob.company
         else:
             problem = Problem(
                 id=prob.problem_id,
@@ -968,33 +1021,34 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
                 url=url,
                 difficulty=prob.difficulty or "Medium",
                 topics=topics_csv,
+                companies=prob.company,
                 is_solved=True
             )
             db.add(problem)
 
-        # Record accepted attempt if not already present
+        # Record accepted attempt with actual solve timestamp if not already present
         if prob.problem_id not in existing_attempts:
             att = Attempt(
                 problem_id=prob.problem_id,
                 verdict="Accepted",
                 root_cause_category="none",
                 explanation_text="Synced from LeetCode solved history.",
-                timestamp=now_utc
+                timestamp=actual_solve_dt
             )
             db.add(att)
             existing_attempts.add(prob.problem_id)
 
-        # Seed initial spaced repetition schedule for solved problem (due in 3 days)
+        # Seed initial spaced repetition schedule for solved problem
         if prob.problem_id not in existing_srs:
             sr = SpacedRepetition(
                 problem_id=prob.problem_id,
                 stage=1,
-                last_solved=now_utc,
-                next_due=due_utc
+                last_solved=actual_solve_dt,
+                next_due=now_utc + timedelta(days=3)
             )
             db.add(sr)
 
-    # 2. Seed per-topic mastery from solved counts (never clobber live data).
+    # 2. Seed per-topic mastery from solved counts (never clobber live test badges).
     existing_masteries = {
         tm.topic: tm for tm in db.query(TopicMastery).filter(TopicMastery.topic.in_(list(topics_seen))).all()
     } if topics_seen else {}
@@ -1005,12 +1059,12 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
         solved_count = solved_per_topic[topic]
         mastery = existing_masteries.get(topic)
         if not mastery:
-            # Brand-new topic: seed with level 0 (Locked badge)
+            # Brand-new topic: seed with level 0 (Locked badge), attempts = solved_count, success_count = 0
             mastery = TopicMastery(
                 topic=topic,
                 rating=800.0,
                 attempts_count=solved_count,
-                success_count=solved_count,
+                success_count=0,
                 level=0
             )
             db.add(mastery)
@@ -1020,8 +1074,21 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
             if solved_count > mastery.attempts_count:
                 mastery.attempts_count = solved_count
                 seeded_topics += 1
-            if solved_count > mastery.success_count:
-                mastery.success_count = solved_count
+
+    # 3. Store persistent account sync metadata in UserConfig
+    username = req.username or "LeetCode User"
+    sync_meta = {
+        "username": username,
+        "synced_count": len(req.problems),
+        "topics_count": len(topics_seen),
+        "last_synced": now_utc.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    cfg_account = db.query(UserConfig).filter(UserConfig.key == "synced_account").first()
+    if cfg_account:
+        cfg_account.value = json.dumps(sync_meta)
+    else:
+        cfg_account = UserConfig(key="synced_account", value=json.dumps(sync_meta))
+        db.add(cfg_account)
 
     db.commit()
     synced = len(req.problems)
@@ -1030,8 +1097,105 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
         "topics": len(topics_seen),
         "new_topics": new_topics,
         "seeded_topics": seeded_topics,
-        "message": f"Synced {synced} problem(s) across {len(topics_seen)} topic(s); seeded {seeded_topics} topic(s)."
+        "username": username,
+        "message": f"Synced {synced} problem(s) across {len(topics_seen)} topic(s) for {username}; seeded {seeded_topics} topic(s)."
     }
+
+
+@app.get("/sync/account")
+def get_synced_account(db: Session = Depends(get_db)):
+    """Returns persistent account sync metadata stored in the database."""
+    import json
+    cfg = db.query(UserConfig).filter(UserConfig.key == "synced_account").first()
+    if cfg and cfg.value:
+        try:
+            return {"status": "synced", "account": json.loads(cfg.value)}
+        except Exception:
+            pass
+    total_solved = db.query(Problem).filter(Problem.is_solved == True).count()
+    return {
+        "status": "ready",
+        "account": {
+            "username": "LeetCode User",
+            "synced_count": total_solved,
+            "topics_count": 0,
+            "last_synced": None
+        }
+    }
+
+
+@app.get("/problems/solved", response_model=List[SolvedProblemTableItem])
+def get_solved_problems_table(db: Session = Depends(get_db)):
+    """
+    Returns all solved problems with metadata, actual solve dates, user notes,
+    personal difficulty rating, attempt counts, and spaced repetition review schedules for the interactive table.
+    """
+    now = get_utc_now()
+    solved_problems = db.query(Problem).filter(Problem.is_solved == True).all()
+
+    sr_records = {sr.problem_id: sr for sr in db.query(SpacedRepetition).all()}
+
+    attempts_all = db.query(Attempt).all()
+    attempts_by_problem = {}
+    for a in attempts_all:
+        attempts_by_problem.setdefault(a.problem_id, []).append(a)
+
+    items = []
+    for p in solved_problems:
+        p_attempts = attempts_by_problem.get(p.id, [])
+        accepted_attempts = [a for a in p_attempts if a.verdict == "Accepted"]
+
+        # Accurate date solved determination
+        if accepted_attempts:
+            # Pick earliest or latest accepted attempt timestamp
+            date_solved_ts = min(accepted_attempts, key=lambda a: a.timestamp).timestamp
+        elif p_attempts:
+            date_solved_ts = min(p_attempts, key=lambda a: a.timestamp).timestamp
+        else:
+            date_solved_ts = now
+
+        date_solved_str = date_solved_ts.strftime("%Y-%m-%d")
+
+        # Spaced Repetition status
+        sr = sr_records.get(p.id)
+        if sr:
+            next_due_str = sr.next_due.strftime("%Y-%m-%d")
+            stage_names = {1: "Stage 1 (3d)", 2: "Stage 2 (7d)", 3: "Stage 3 (14d)", 4: "Stage 4 (30d)", 5: "Mastered"}
+            schedule_str = stage_names.get(sr.stage, f"Stage {sr.stage}")
+            if sr.stage >= 5:
+                status_str = "Mastered"
+            elif sr.next_due <= now:
+                status_str = "Due Today"
+            else:
+                days_left = (sr.next_due.date() - now.date()).days
+                status_str = f"In {days_left}d"
+        else:
+            next_due_str = "—"
+            schedule_str = "Unscheduled"
+            status_str = "—"
+
+        max_hints = max([a.hints_used for a in p_attempts], default=0)
+
+        items.append(SolvedProblemTableItem(
+            problem_id=p.id,
+            title=p.title,
+            url=p.url,
+            difficulty=p.difficulty or "Medium",
+            topics=p.topics or "",
+            companies=p.companies or "",
+            date_solved=date_solved_str,
+            next_review_due=next_due_str,
+            review_schedule=schedule_str,
+            review_status=status_str,
+            attempts_count=len(p_attempts),
+            user_notes=p.user_notes or "",
+            personal_difficulty=p.personal_difficulty or "",
+            hints_used=max_hints
+        ))
+
+    # Sort descending by date solved
+    items.sort(key=lambda x: x.date_solved, reverse=True)
+    return items
 
 
 @app.get("/reviews/count")
@@ -1296,26 +1460,33 @@ def start_mock_interview(req: MockStartRequest, db: Session = Depends(get_db)):
                 if pid.strip():
                     recently_used_ids.add(pid.strip())
 
-    # 2. Build candidate problem pool
+    # 2. Build candidate problem pool (strictly non-premium)
     candidate_pool = []
     if req.company:
         company_probs = db.query(Problem).filter(
             Problem.companies.like(f"%{req.company}%"),
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS),
             Problem.is_premium == False
         ).all()
         if len(company_probs) >= 15:
             candidate_pool = company_probs
         else:
             # Combine specific company problems with general non-premium problem pool to ensure rich variety
-            all_non_prem = db.query(Problem).filter(Problem.is_premium == False).all()
+            all_non_prem = db.query(Problem).filter(
+                Problem.is_premium == False,
+                Problem.id.notin_(KNOWN_PREMIUM_SLUGS)
+            ).all()
             # Order company_probs first, followed by general problems
             seen = set()
             for p in company_probs + all_non_prem:
-                if p.id not in seen:
+                if p.id not in seen and p.id not in KNOWN_PREMIUM_SLUGS:
                     seen.add(p.id)
                     candidate_pool.append(p)
     else:
-        candidate_pool = db.query(Problem).filter(Problem.is_premium == False).all()
+        candidate_pool = db.query(Problem).filter(
+            Problem.is_premium == False,
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS)
+        ).all()
 
     # 3. Filter out recently used problems if enough fresh problems exist
     fresh_pool = [p for p in candidate_pool if p.id not in recently_used_ids]
@@ -2038,6 +2209,51 @@ def get_weekly_journal(db: Session = Depends(get_db)):
             date_str = a.timestamp.strftime("%Y-%m-%d %H:%M")
             md_lines.append(f"- **[{a.problem.title}]({a.problem.url})** — *Solved on {date_str}* (Difficulty: {a.problem.difficulty} | Topics: {a.problem.topics})")
 
+    # Gather distinct solved problems & topics practiced
+    solved_problem_titles = []
+    topics_practiced = set()
+    if accepted_attempts:
+        for a in accepted_attempts:
+            if a.problem and a.problem.title:
+                if a.problem.title not in solved_problem_titles:
+                    solved_problem_titles.append(a.problem.title)
+                if a.problem.topics:
+                    for t in a.problem.topics.split(","):
+                        if t.strip():
+                            topics_practiced.add(t.strip())
+
+    # Generate AI Growth Analysis & Pattern Spotlight
+    ai_insights = generate_weekly_ai_insights(
+        total_attempts=len(attempts),
+        total_solved=total_solved,
+        mistakes_by_category=dict(by_category),
+        solved_problems=solved_problem_titles,
+        topics_practiced=list(topics_practiced)
+    )
+
+    ai_growth = ai_insights.get("ai_growth_summary", "")
+    concepts = ai_insights.get("concepts_learned", [])
+    spotlight = ai_insights.get("pattern_spotlight", "")
+
+    # Insert AI Growth Section at the top of the markdown
+    if ai_growth or spotlight:
+        ai_section = [
+            "",
+            "## 🤖 AI Coach: Weekly Growth Reflection",
+            f"> {ai_growth}",
+            ""
+        ]
+        if concepts:
+            ai_section.append("### 🧠 Core Algorithmic Patterns & Concepts Strengthened:")
+            for c in concepts:
+                ai_section.append(f"- 🔹 {c}")
+            ai_section.append("")
+        if spotlight:
+            ai_section.append("### 💡 DSA Pattern Spotlight & Pro-Tip of the Week:")
+            ai_section.append(f"{spotlight}")
+            ai_section.append("")
+        md_lines = md_lines[:3] + ai_section + md_lines[3:]
+
     if example_problems:
         md_lines.extend(["", "## Review Suggested For Problems:", *[f"- {p}" for p in list(example_problems)[:10]]])
 
@@ -2048,7 +2264,10 @@ def get_weekly_journal(db: Session = Depends(get_db)):
         total_solved=total_solved,
         by_category=dict(by_category),
         example_problems=list(example_problems)[:10],
-        markdown_text="\n".join(md_lines)
+        markdown_text="\n".join(md_lines),
+        ai_growth_summary=ai_growth,
+        concepts_learned=concepts,
+        pattern_spotlight=spotlight
     )
 
 

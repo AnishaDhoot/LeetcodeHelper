@@ -122,6 +122,50 @@ def repair_json_string(s: str) -> str:
     return s
 
 
+PEDAGOGICAL_NO_CODE_RULE = (
+    "\n\nSTRICT PEDAGOGICAL POLICY: NEVER provide complete code solutions, full function implementations, "
+    "or copy-pasteable code answers in ANY programming language (Python, C++, Java, JS, Go, Rust, etc.). "
+    "High-level pseudocode, step-by-step logic, state transition rules, and conceptual explanations are welcome, "
+    "but NEVER generate a complete working solution."
+)
+
+
+def sanitize_ai_text(text: str) -> str:
+    """
+    Sanitizes LLM text output to guarantee that full executable code blocks are not leaked to the user.
+    Permits high-level pseudocode, but strips full programming language solution implementations.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # Detect full class/function blocks in common languages
+    full_code_patterns = [
+        r"```(?:python|py|cpp|c\+\+|java|javascript|js|typescript|ts|go|rust|c|csharp|cs)\s*\n(.*?)```",
+    ]
+    for pat in full_code_patterns:
+        matches = re.findall(pat, text, flags=re.DOTALL | re.IGNORECASE)
+        for code_block in matches:
+            # If it looks like a full function implementation (e.g. def / class Solution / return)
+            if re.search(r"\b(class Solution|def \w+\(self,|public \w+ \w+\(|int main\(|function \w+\()", code_block):
+                # Replace with high-level pseudocode reminder
+                text = text.replace(
+                    f"```{code_block}```",
+                    "(Complete code suppressed for pedagogical integrity. Refer to the step-by-step logic and pseudocode above.)"
+                )
+    return text
+
+
+def sanitize_dict_strings(obj):
+    """Recursively sanitizes all string fields in a dictionary or list."""
+    if isinstance(obj, str):
+        return sanitize_ai_text(obj)
+    elif isinstance(obj, dict):
+        return {k: sanitize_dict_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_dict_strings(v) for v in obj]
+    return obj
+
+
 def query_llm(prompt: str, system_prompt: str) -> str:
     """Queries Groq if key is set, falling back to local Ollama if Groq fails or is unconfigured."""
     api_key = get_groq_api_key()
@@ -150,10 +194,10 @@ def query_llm_json(prompt: str, system_prompt: str, default_fallback: dict) -> d
                 parsed = json.loads(repaired)
 
             if isinstance(parsed, dict):
-                return parsed
+                return sanitize_dict_strings(parsed)
         except Exception as e:
             print(f"LLM JSON query attempt {attempt + 1} failed: {e}")
-    return default_fallback
+    return sanitize_dict_strings(default_fallback)
 
 
 def generate_diagnosis(
@@ -188,6 +232,7 @@ def generate_diagnosis(
         '  "explanation": "Your detailed explanation here.",\n'
         '  "suggested_action": "Your recommended action here."\n'
         "}"
+        + PEDAGOGICAL_NO_CODE_RULE
     )
 
     # Format test case info
@@ -249,8 +294,9 @@ def generate_approach_critique(
         '  "current_complexity": "e.g., O(N^2) time, O(1) space",\n'
         '  "optimal_complexity": "e.g., O(N) time, O(N) space",\n'
         '  "feedback": "Critique their approach in 2-3 sentences. Tell them if it is good or if there is a better way.",\n'
-        '  "alternative_approach": "Briefly describe the optimal approach steps."\n'
+        '  "alternative_approach": "Briefly describe the optimal approach steps. High-level pseudocode is allowed, but do NOT provide raw executable code solutions."\n'
         "}"
+        + PEDAGOGICAL_NO_CODE_RULE
     )
 
     constraints_str = "\n".join(constraints) if constraints else "None provided"
@@ -287,6 +333,7 @@ def generate_hint(
         "{\n"
         '  "hint": "Your detailed, actionable conceptual hint here."\n'
         "}"
+        + PEDAGOGICAL_NO_CODE_RULE
     )
 
     constraints_str = "\n".join(constraints) if constraints else "None provided"
@@ -343,6 +390,7 @@ def generate_levelled_hint(
         '  "level": 1,\n'
         '  "has_next": true\n'
         "}"
+        + PEDAGOGICAL_NO_CODE_RULE
     )
 
     constraints_str = "\n".join(constraints) if constraints else "None provided"
@@ -363,12 +411,12 @@ def generate_levelled_hint(
     result = query_llm_json(user_prompt, system_prompt, fallback)
     try:
         hint_val = result.get("hint", fallback["hint"])
-        level_val = int(result.get("level", level))
-        has_next_val = bool(result.get("has_next", level < 3)) if level_val < 3 else False
+        level_val = level
+        has_next_val = (level < 3)
     except Exception:
         hint_val = fallback["hint"]
         level_val = level
-        has_next_val = level < 3
+        has_next_val = (level < 3)
 
     return {
         "hint": hint_val,
@@ -394,6 +442,7 @@ def analyze_edge_cases(
         '  ],\n'
         '  "constraints_critique": "Explain what the constraints mean for performance (e.g. an O(N^2) solution will TLE because N is up to 10^5)."\n'
         "}"
+        + PEDAGOGICAL_NO_CODE_RULE
     )
 
     constraints_str = "\n".join(constraints) if constraints else "None provided"
@@ -431,6 +480,7 @@ def answer_custom_question(
         "{\n"
         '  "answer": "Your detailed answer here."\n'
         "}"
+        + PEDAGOGICAL_NO_CODE_RULE
     )
 
     constraints_str = "\n".join(constraints) if constraints else "None provided"
@@ -562,4 +612,54 @@ def generate_mock_scorecard(company: str, duration_seconds: int, questions_data:
         "areas_for_improvement": ["Practice edge case validation before submitting", "Optimize space complexity where possible"]
     }
     
+    return query_llm_json(prompt, system_prompt, fallback)
+
+
+def generate_weekly_ai_insights(
+    total_attempts: int,
+    total_solved: int,
+    mistakes_by_category: dict,
+    solved_problems: list,
+    topics_practiced: list
+) -> dict:
+    """
+    Generates personalized AI learning takeaways, growth reflection, concepts mastered,
+    and an interesting DSA pattern/trivia spotlight for the Weekly DSA Digest.
+    """
+    system_prompt = (
+        "You are an inspiring, highly knowledgeable Principal Staff DSA & Algorithms Coach.\n"
+        "Analyze the user's weekly LeetCode practice metrics, solved problems, and mistake distributions.\n"
+        "Generate an encouraging, intellectually stimulating reflection covering:\n"
+        "1. AI Growth & Improvement Analysis (2-3 sentences on their velocity, consistency, resilience, and reduction in errors).\n"
+        "2. Core Concepts & Algorithmic Patterns Mastered (3-4 bullet points highlighting key patterns like Monotonic Stack, Two Pointers, DFS tree pruning, Prefix Sums, etc.).\n"
+        "3. DSA Pattern Spotlight & Trivia of the Week (An interesting, mind-expanding DSA pattern insight, trade-off analysis, or algorithmic proof/trick—e.g. Floyd's cycle detection 2k math trick, bitwise XOR cancellation property, Kadane's dynamic programming connection, or cache-locality of 1D vs 2D memory arrays).\n\n"
+        "You MUST respond in strict JSON format with keys:\n"
+        "{\n"
+        '  "ai_growth_summary": "Your inspiring 2-3 sentence progress & momentum evaluation.",\n'
+        '  "concepts_learned": ["Specific algorithmic concept or pattern 1", "Specific algorithmic concept or pattern 2", "Specific algorithmic concept or pattern 3"],\n'
+        '  "pattern_spotlight": "Engaging DSA pro-tip / pattern spotlight / trivia explanation."\n'
+        "}"
+        + PEDAGOGICAL_NO_CODE_RULE
+    )
+
+    prompt = (
+        f"Weekly Practice Summary:\n"
+        f"- Total Attempt Logs: {total_attempts}\n"
+        f"- Total Solved Questions: {total_solved}\n"
+        f"- Mistake Breakdown: {json.dumps(mistakes_by_category)}\n"
+        f"- Solved Problems: {', '.join(solved_problems[:12]) if solved_problems else 'None logged this week'}\n"
+        f"- Topics Practiced: {', '.join(topics_practiced[:8]) if topics_practiced else 'General DSA'}\n\n"
+        "Please generate the AI Weekly Digest insights and return a valid JSON object only."
+    )
+
+    fallback = {
+        "ai_growth_summary": f"Great consistency this week with {total_solved} solved problems across {len(topics_practiced)} distinct topic areas! Your deliberate practice is sharpening your algorithmic intuition and reducing edge-case slips.",
+        "concepts_learned": [
+            "Pattern recognition across sliding window and hash-map lookup strategies",
+            "Boundary handling and off-by-one index guards for arrays and strings",
+            "Time vs space trade-offs when transitioning from brute-force O(N²) to optimal O(N) approaches"
+        ],
+        "pattern_spotlight": "💡 **Pro-Tip of the Week — The Monotonic Stack Invariant**: A monotonic stack maintains elements in strictly ascending or descending order. Whenever a new element violates the monotonicity, popping elements resolves their 'next greater/smaller' neighbor in O(N) aggregate time because each element is pushed and popped at most once!"
+    }
+
     return query_llm_json(prompt, system_prompt, fallback)

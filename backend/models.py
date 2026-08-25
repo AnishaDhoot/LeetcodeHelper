@@ -289,10 +289,30 @@ class SolvedProblemSyncSchema(BaseModel):
     difficulty: str
     topics: List[str]
     company: Optional[str] = None  # 1.1: optional company tag from sync source
+    solved_at: Optional[str] = None  # ISO timestamp string if known
+    timestamp: Optional[int] = None  # Epoch timestamp integer in seconds
 
 
 class SyncSolvedRequest(BaseModel):
     problems: List[SolvedProblemSyncSchema]
+    username: Optional[str] = None
+
+
+class SolvedProblemTableItem(BaseModel):
+    problem_id: str
+    title: str
+    url: str
+    difficulty: str
+    topics: str
+    companies: Optional[str] = None
+    date_solved: str
+    next_review_due: str
+    review_schedule: str
+    review_status: str
+    attempts_count: int
+    user_notes: Optional[str] = ""
+    personal_difficulty: Optional[str] = ""
+    hints_used: int = 0
 
 
 class TopicStatItem(BaseModel):
@@ -463,6 +483,9 @@ class WeeklyJournalResponse(BaseModel):
     by_category: dict          # { category: count }
     example_problems: List[str]
     markdown_text: str
+    ai_growth_summary: Optional[str] = None
+    concepts_learned: List[str] = []
+    pattern_spotlight: Optional[str] = None
 
 
 # --- Mock interview schemas (Tier 4.1) ---
