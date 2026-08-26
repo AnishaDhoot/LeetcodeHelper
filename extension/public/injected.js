@@ -394,98 +394,79 @@ window.addEventListener("message", (event) => {
     applyAssessmentTabLocking(event.data.locked, event.data.reason);
   }
 
-// Helper to get active language slug
-const getCurrentLanguageSlug = () => {
-  const langBtn = document.querySelector('button[id*="headlessui-listbox-button"], [data-cy="lang-select"], [class*="lang-select"], button:has([class*="text-xs"])');
-  const langText = (langBtn?.textContent || '').trim().toLowerCase();
-  
-  if (langText.includes('python3') || langText === 'python3') return 'python3';
-  if (langText.includes('python') || langText === 'python') return 'python3';
-  if (langText.includes('c++') || langText.includes('cpp')) return 'cpp';
-  if (langText.includes('java') && !langText.includes('script')) return 'java';
-  if (langText.includes('javascript') || langText.includes('js')) return 'javascript';
-  if (langText.includes('typescript') || langText.includes('ts')) return 'typescript';
-  if (langText.includes('c#') || langText.includes('csharp')) return 'csharp';
-  if (langText.includes('c') && langText.length <= 2) return 'c';
-  if (langText.includes('go') || langText.includes('golang')) return 'golang';
-  if (langText.includes('rust')) return 'rust';
-  if (langText.includes('swift')) return 'swift';
-  if (langText.includes('kotlin')) return 'kotlin';
+  if (event.data && event.data.type === "RESET_EDITOR") {
+    try {
+      const executeReset = () => {
+        const allButtons = Array.from(document.querySelectorAll(
+          'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset"], [aria-label*="reset"], [title*="Reset"], [title*="reset"], [aria-label*="default code"], [title*="default code"], [aria-label*="Retrieve default"], [title*="Retrieve default"]'
+        ));
 
-  if (window.monaco?.editor) {
-    const models = window.monaco.editor.getModels() || [];
-    for (const m of models) {
-      const modeId = m.getLanguageId ? m.getLanguageId() : m.getModeId ? m.getModeId() : '';
-      if (modeId) {
-        if (modeId === 'python') return 'python3';
-        return modeId;
-      }
-    }
-  }
-  return 'python3';
-};
+        let resetBtn = allButtons.find(el => {
+          if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+          const str = (
+            (el.getAttribute('title') || '') + ' ' +
+            (el.getAttribute('aria-label') || '') + ' ' +
+            (el.getAttribute('data-cypress') || '') + ' ' +
+            (el.getAttribute('data-cy') || '') + ' ' +
+            (el.getAttribute('data-track-name') || '') + ' ' +
+            (el.textContent || '') + ' ' +
+            (el.innerHTML || '')
+          ).toLowerCase();
 
-const resetCooldownBySlug = new Map();
-let isResettingCode = false;
+          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('rotate-ccw');
+        });
 
-// Full multi-strategy reset function to restore clean default boilerplate using native LeetCode reset
-const resetMonacoToStarterCode = () => {
-  const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
-  const slug = match ? match[1] : null;
-  if (!slug) return;
-
-  const now = Date.now();
-  const lastReset = resetCooldownBySlug.get(slug) || 0;
-  if (now - lastReset < 2500) {
-    return; // Rate limit guard
-  }
-  resetCooldownBySlug.set(slug, now);
-
-  if (isResettingCode) return;
-  isResettingCode = true;
-
-  try {
-    // Strategy: Click Native Reset to Default Code Button & Auto-Confirm Dialog
-    const allButtons = Array.from(document.querySelectorAll(
-      'button[data-cypress="ResetCode"], button[aria-label*="Reset" i], button[title*="Reset" i], button[aria-label*="default" i], button[title*="default" i], button[title*="restore" i], button[aria-label*="restore" i]'
-    ));
-    let resetBtn = allButtons.find(el => !el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container"));
-    
-    if (!resetBtn) {
-      const editorHeaders = document.querySelectorAll('[class*="editor-header"], [class*="editor"] [class*="tools"], .monaco-editor, [class*="toolbar"]');
-      for (const bar of editorHeaders) {
-        const btns = bar.querySelectorAll('button, svg, [role="button"]');
-        for (const b of btns) {
-          const html = (b.outerHTML || '').toLowerCase();
-          if (html.includes('reset') || html.includes('rotate') || html.includes('default') || html.includes('undo')) {
-            resetBtn = b.closest('button, [role="button"]') || b;
-            break;
+        // Also search inside editor header toolbars specifically
+        if (!resetBtn) {
+          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"]');
+          for (const bar of editorToolbars) {
+            const btns = bar.querySelectorAll('button, svg, [role="button"]');
+            for (const b of btns) {
+              const html = (b.outerHTML || '').toLowerCase();
+              if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default')) {
+                resetBtn = b.closest('button, [role="button"]') || b;
+                break;
+              }
+            }
+            if (resetBtn) break;
           }
         }
-        if (resetBtn) break;
+
+        if (resetBtn) {
+          resetBtn.click();
+          // Confirm the reset modal with multiple attempts
+          [100, 250, 450, 700, 1100].forEach(delay => {
+            setTimeout(() => {
+              const confirmBtns = Array.from(document.querySelectorAll(
+                'button, div[role="button"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button'
+              ));
+              const confirmBtn = confirmBtns.find(b => {
+                if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+                const txt = (b.textContent || '').trim().toLowerCase();
+                const cls = (b.className || '').toLowerCase();
+                return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm');
+              });
+              if (confirmBtn) confirmBtn.click();
+            }, delay);
+          });
+        }
+      };
+
+      // Run immediate and staggered attempts to catch DOM readiness
+      executeReset();
+      setTimeout(executeReset, 350);
+      setTimeout(executeReset, 800);
+      setTimeout(executeReset, 1500);
+
+      // Re-apply readOnly state if locked
+      if (window.__dsaTutorReadOnly) {
+        setTimeout(() => {
+          applyReadOnlyState(true);
+        }, 400);
       }
+    } catch (e) {
+      console.error("[DSA Tutor Injected] Error resetting editor:", e);
     }
-
-    if (resetBtn) {
-      resetBtn.click();
-      setTimeout(() => {
-        const confirmBtn = document.querySelector('button[data-cypress="Confirm"], [data-cy="confirm-btn"], div[role="dialog"] button.bg-red-500, div[role="dialog"] button.bg-primary, div[role="dialog"] button');
-        if (confirmBtn) confirmBtn.click();
-      }, 150);
-    }
-  } catch (err) {
-    console.warn("[DSA Tutor Injected] Error in resetMonacoToStarterCode:", err);
-  } finally {
-    setTimeout(() => { isResettingCode = false; }, 500);
-  }
-};
-
-window.__dsaTutorResetEditor = resetMonacoToStarterCode;
-
-let lastKnownAssessmentSlug = "";
-
-  if (event.data && event.data.type === "RESET_EDITOR") {
-    resetMonacoToStarterCode();
   }
 });
 
@@ -494,26 +475,11 @@ setInterval(() => {
   if (window.__dsaTutorReadOnly) {
     applyReadOnlyState(true);
   }
-}, 500);
+}, 400);
 
-// Enforce assessment tab locking every 600ms (NO automatic GraphQL reset in loop)
+// Continuously enforce assessment locking while assessment is active
 setInterval(() => {
   if (window.__dsaTutorAssessmentLocked) {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
   }
-}, 600);
-
-// Only reset editor when URL slug actually changes
-const checkAssessmentSlugChange = () => {
-  const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
-  const curSlug = match ? match[1] : "";
-  if (curSlug && curSlug !== lastKnownAssessmentSlug) {
-    lastKnownAssessmentSlug = curSlug;
-    if (window.__dsaTutorAssessmentLocked) {
-      resetMonacoToStarterCode();
-    }
-  }
-};
-
-window.addEventListener("popstate", checkAssessmentSlugChange);
-setInterval(checkAssessmentSlugChange, 1200);
+}, 300);
