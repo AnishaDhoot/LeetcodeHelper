@@ -364,17 +364,6 @@ const checkNodeForVerdict = (node) => {
         return;
       }
 
-      // Check if inside a real submission result card OR user submitted recently
-      const isSubmissionContainer = !!node.closest(
-        '[data-e2e-locator="submission-result"], [class*="submission-result"], [class*="status-accepted"], [class*="result_container"], div[data-layout-path*="submission"], div[data-layout-path*="result"]'
-      );
-      const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
-      const isRecentSubmit = lastSubmitClickTimestamp > 0 && timeSinceSubmit <= 90000;
-
-      if (!isSubmissionContainer && !isRecentSubmit && lastSubmitClickTimestamp !== 0) {
-        return;
-      }
-
       // Reset submission timestamp immediately to prevent duplicate triggers
       lastSubmitClickTimestamp = 0;
 
@@ -414,6 +403,28 @@ const observer = new MutationObserver((mutations) => {
     }
   }
 });
+
+// Attach observer to document.body and run backup polling
+const startVerdictObserver = () => {
+  const target = document.body || document.documentElement;
+  if (target) {
+    observer.observe(target, { childList: true, subtree: true, characterData: true });
+  }
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startVerdictObserver);
+} else {
+  startVerdictObserver();
+}
+
+// Backup periodic scanner for active submission results in DOM
+setInterval(() => {
+  const candidates = document.querySelectorAll(
+    '[data-e2e-locator="submission-result"], [class*="submission-result"], [class*="status-accepted"], [class*="result_container"], div[data-layout-path*="submission"], div[data-layout-path*="result"], span[data-e2e-locator="submission-result"]'
+  );
+  candidates.forEach(el => checkNodeForVerdict(el));
+}, 1200);
 
 // Direct Content Script Fairplay Locking for Solutions, Editorial, Discussions, and Submissions
 const injectDirectLockCSS = (isLocked) => {
