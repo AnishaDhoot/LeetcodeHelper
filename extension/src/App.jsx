@@ -140,8 +140,8 @@ export default function App() {
   };
 
   const submitBadgeTest = () => {
+    setShowBadgeSubmitConfirm(false);
     chrome.runtime.sendMessage({ action: 'submit_badge_test' }, (res) => {
-      setShowBadgeSubmitConfirm(false);
       if (res && res.success) {
         if (res.data?.passed) {
           setBadgeAwardModal({
@@ -151,14 +151,11 @@ export default function App() {
             rating: res.data.rating,
             message: res.data.message
           });
-        } else {
-          alert(res.data?.message || 'Badge Test submitted. Both problems must be solved to earn the badge.');
         }
         setActiveTest(null);
         setActiveTab('mastery');
         fetchMastery();
-      } else {
-        alert(res?.error || 'Failed to submit Badge Test.');
+        window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked: false }, '*');
       }
     });
   };

@@ -394,11 +394,70 @@ window.addEventListener("message", (event) => {
     applyAssessmentTabLocking(event.data.locked, event.data.reason);
   }
 
+// Helper to extract active programming language
+const getActiveLanguageFromPage = () => {
+  const langBtn = document.querySelector('button[id*="headlessui-listbox-button"], [data-cy="lang-select"], [class*="lang-select"], button:has([class*="text-xs"])');
+  const txt = (langBtn?.textContent || '').trim().toLowerCase();
+  if (txt.includes('python3') || txt === 'python3') return 'python3';
+  if (txt.includes('python')) return 'python3';
+  if (txt.includes('c++') || txt.includes('cpp')) return 'cpp';
+  if (txt.includes('java') && !txt.includes('script')) return 'java';
+  if (txt.includes('javascript') || txt.includes('js')) return 'javascript';
+  if (txt.includes('typescript') || txt.includes('ts')) return 'typescript';
+  if (txt.includes('c#') || txt.includes('csharp')) return 'csharp';
+  if (txt.includes('c') && txt.length <= 2) return 'c';
+  if (txt.includes('go') || txt.includes('golang')) return 'golang';
+  if (txt.includes('rust')) return 'rust';
+  
+  if (window.monaco?.editor) {
+    const models = window.monaco.editor.getModels() || [];
+    for (const m of models) {
+      const modeId = m.getLanguageId ? m.getLanguageId() : m.getModeId ? m.getModeId() : '';
+      if (modeId) {
+        if (modeId === 'python') return 'python3';
+        return modeId;
+      }
+    }
+  }
+  return 'python3';
+};
+
+// Helper to extract starter code from page embedded __NEXT_DATA__ with 0 network calls
+const getStarterSnippetFromPage = () => {
+  try {
+    const nextScript = document.getElementById('__NEXT_DATA__');
+    if (!nextScript) return null;
+    const data = JSON.parse(nextScript.textContent || '{}');
+    const queries = data?.props?.pageProps?.dehydratedState?.queries || [];
+    for (const q of queries) {
+      const snippets = q?.state?.data?.question?.codeSnippets || q?.state?.data?.questionData?.codeSnippets;
+      if (snippets && Array.isArray(snippets) && snippets.length > 0) {
+        const lang = getActiveLanguageFromPage();
+        const found = snippets.find(s => s.langSlug === lang || s.lang?.toLowerCase() === lang || lang.includes(s.langSlug));
+        return found ? found.code : snippets[0].code;
+      }
+    }
+  } catch (e) {}
+  return null;
+};
+
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
+      // 1. Direct Monaco model injection from embedded page data (instant, 0 network requests)
+      const starterCode = getStarterSnippetFromPage();
+      if (starterCode && window.monaco?.editor) {
+        const models = window.monaco.editor.getModels() || [];
+        const validModels = models.filter(m => !m.uri.toString().includes("testcase") && !m.uri.toString().includes("input"));
+        const target = validModels.length > 0 ? validModels[0] : models[0];
+        if (target) {
+          target.setValue(starterCode);
+        }
+      }
+
+      // 2. Click native LeetCode reset button & confirm dialog
       const executeReset = () => {
         const allButtons = Array.from(document.querySelectorAll(
-          'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset"], [aria-label*="reset"], [title*="Reset"], [title*="reset"], [aria-label*="default code"], [title*="default code"], [aria-label*="Retrieve default"], [title*="Retrieve default"]'
+          'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset" i], [aria-label*="reset" i], [title*="Reset" i], [title*="reset" i], [aria-label*="default code" i], [title*="default code" i], [aria-label*="Retrieve default" i], [title*="Retrieve default" i], [title*="Restore" i], [aria-label*="Restore" i]'
         ));
 
         let resetBtn = allButtons.find(el => {
@@ -418,7 +477,7 @@ window.addEventListener("message", (event) => {
 
         // Also search inside editor header toolbars specifically
         if (!resetBtn) {
-          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"]');
+          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"], [class*="toolbar"]');
           for (const bar of editorToolbars) {
             const btns = bar.querySelectorAll('button, svg, [role="button"]');
             for (const b of btns) {
@@ -434,11 +493,10 @@ window.addEventListener("message", (event) => {
 
         if (resetBtn) {
           resetBtn.click();
-          // Confirm the reset modal with multiple attempts
-          [100, 250, 450, 700, 1100].forEach(delay => {
+          [80, 180, 320, 550, 900, 1400].forEach(delay => {
             setTimeout(() => {
               const confirmBtns = Array.from(document.querySelectorAll(
-                'button, div[role="button"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button'
+                'button, div[role="button"], [data-cypress="Confirm"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, div[role="dialog"] button'
               ));
               const confirmBtn = confirmBtns.find(b => {
                 if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
@@ -454,9 +512,9 @@ window.addEventListener("message", (event) => {
 
       // Run immediate and staggered attempts to catch DOM readiness
       executeReset();
-      setTimeout(executeReset, 350);
-      setTimeout(executeReset, 800);
-      setTimeout(executeReset, 1500);
+      setTimeout(executeReset, 250);
+      setTimeout(executeReset, 650);
+      setTimeout(executeReset, 1200);
 
       // Re-apply readOnly state if locked
       if (window.__dsaTutorReadOnly) {
