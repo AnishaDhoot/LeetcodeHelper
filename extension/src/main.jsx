@@ -341,6 +341,16 @@ setInterval(checkUrlChange, 1000);
 const processedVerdictNodes = new WeakSet();
 const lastDetectedSubmissions = new Map();
 
+// Listen for network-intercepted submission verdicts from injected.js
+window.addEventListener('message', (event) => {
+  if (event.source !== window || !event.data) return;
+  if (event.data.type === 'LEETCODE_SUBMISSION_VERDICT') {
+    const { verdict, problemId } = event.data;
+    console.log(`[DSA Tutor Content] Intercepted network submission verdict: ${verdict} for ${problemId}`);
+    handleVerdictDetected(verdict);
+  }
+});
+
 const checkNodeForVerdict = (node) => {
   if (!node || !(node instanceof HTMLElement)) return;
   if (processedVerdictNodes.has(node) || node.dataset?.dsaProcessed === "true") return;
@@ -352,17 +362,16 @@ const checkNodeForVerdict = (node) => {
   for (const v of verdicts) {
     // Only match small text leaves (like status badges) to avoid match triggers on large parent divs.
     if (text === v || (text.includes(v) && text.length < 40)) {
-      // Mark element as processed immediately
-      processedVerdictNodes.add(node);
-      try { node.dataset.dsaProcessed = "true"; } catch (e) {}
-
-      // STRICT CHECK 1: Ignore all verdicts from sample test runner / console / testcase tabs
+      // Ignore sample test runner tabs specifically
       const isRunSamplePanel = !!node.closest(
-        '[data-e2e-locator="console-result"], [data-layout-path*="console"], [data-layout-path*="testcase"], [class*="console"], [class*="testcase"], [class*="run-code"], [class*="run-result"], [class*="test-result"], [class*="testcase-result"], div[id*="testcase"], div[id*="console"]'
+        '[data-e2e-locator="console-testcase-output"], [data-e2e-locator="runcode-result"], div[id*="testcase-tab"]'
       );
       if (isRunSamplePanel) {
         return;
       }
+
+      processedVerdictNodes.add(node);
+      try { node.dataset.dsaProcessed = "true"; } catch (e) {}
 
       // Reset submission timestamp immediately to prevent duplicate triggers
       lastSubmitClickTimestamp = 0;
@@ -378,6 +387,7 @@ const checkNodeForVerdict = (node) => {
       }
 
       lastDetectedSubmissions.set(subKey, now);
+      console.log(`[DSA Tutor Content] DOM submission verdict detected: ${v} for ${problemId}`);
       handleVerdictDetected(v, node);
       break;
     }

@@ -1,3 +1,36 @@
+// Intercept LeetCode's submission check API to capture live verdicts 100% reliably
+(() => {
+  try {
+    const origFetch = window.fetch;
+    if (origFetch && !window.__dsaTutorFetchHooked) {
+      window.__dsaTutorFetchHooked = true;
+      window.fetch = async function(...args) {
+        const response = await origFetch.apply(this, args);
+        try {
+          const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+          if (url.includes('/submissions/detail/') && url.includes('/check/')) {
+            const clone = response.clone();
+            clone.json().then(data => {
+              if (data && data.state === 'SUCCESS' && data.status_msg) {
+                const slugMatch = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
+                const problemSlug = slugMatch ? slugMatch[1] : '';
+                window.postMessage({
+                  type: 'LEETCODE_SUBMISSION_VERDICT',
+                  verdict: data.status_msg,
+                  problemId: problemSlug,
+                  totalCorrect: data.total_correct,
+                  totalTestcases: data.total_testcases
+                }, '*');
+              }
+            }).catch(() => {});
+          }
+        } catch (e) {}
+        return response;
+      };
+    }
+  } catch (e) {}
+})();
+
 // Function to apply/enforce readOnly state on Monaco + DOM overlay
 const applyReadOnlyState = (isReadOnly) => {
   window.__dsaTutorReadOnly = !!isReadOnly;
