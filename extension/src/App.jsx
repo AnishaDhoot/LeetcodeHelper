@@ -1292,15 +1292,23 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {activeTest.problem1_solved && (
-                    <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '2px 6px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
-                  )}
                   {currentProblemId === activeTest.problem1.id ? (
-                    <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
+                    activeTest.problem1_solved ? (
+                      <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '4px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved (Active)</span>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
+                    )
                   ) : (
                     <button
                       className="coach-btn"
-                      style={{ fontSize: '11px', padding: '4px 9px', background: '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
+                      style={{
+                        fontSize: '11px',
+                        padding: '4px 9px',
+                        background: activeTest.problem1_solved ? '#14532d44' : '#27272a',
+                        color: activeTest.problem1_solved ? '#4ade80' : '#fff',
+                        border: `1px solid ${activeTest.problem1_solved ? '#15803d66' : '#3f3f46'}`,
+                        fontWeight: activeTest.problem1_solved ? 'bold' : 'normal'
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (activeTest.problem1?.url) {
@@ -1310,7 +1318,7 @@ export default function App() {
                         }
                       }}
                     >
-                      Switch ➔
+                      {activeTest.problem1_solved ? '🟢 Solved ➔' : 'Switch ➔'}
                     </button>
                   )}
                 </div>
@@ -1347,15 +1355,23 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {activeTest.problem2_solved && (
-                    <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '2px 6px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
-                  )}
                   {currentProblemId === activeTest.problem2.id ? (
-                    <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
+                    activeTest.problem2_solved ? (
+                      <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '4px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved (Active)</span>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
+                    )
                   ) : (
                     <button
                       className="coach-btn"
-                      style={{ fontSize: '11px', padding: '4px 9px', background: '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
+                      style={{
+                        fontSize: '11px',
+                        padding: '4px 9px',
+                        background: activeTest.problem2_solved ? '#14532d44' : '#27272a',
+                        color: activeTest.problem2_solved ? '#4ade80' : '#fff',
+                        border: `1px solid ${activeTest.problem2_solved ? '#15803d66' : '#3f3f46'}`,
+                        fontWeight: activeTest.problem2_solved ? 'bold' : 'normal'
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (activeTest.problem2?.url) {
@@ -1365,7 +1381,7 @@ export default function App() {
                         }
                       }}
                     >
-                      Switch ➔
+                      {activeTest.problem2_solved ? '🟢 Solved ➔' : 'Switch ➔'}
                     </button>
                   )}
                 </div>
