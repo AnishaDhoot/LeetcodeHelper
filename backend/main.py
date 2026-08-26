@@ -820,6 +820,84 @@ def abandon_badge_test(db: Session = Depends(get_db)):
     return {"status": "success", "message": "Test abandoned."}
 
 
+@app.post("/badge-test/reset-questions", response_model=BadgeTestSchema)
+def reset_badge_test_questions(db: Session = Depends(get_db)):
+    test = db.query(BadgeTest).filter(BadgeTest.status == "active").order_by(BadgeTest.id.desc()).first()
+    if not test:
+        raise HTTPException(status_code=404, detail="No active Badge Test found to reset.")
+
+    import random
+
+    curated_candidates = []
+    for t in SEED_DATA.get("topics", []):
+        if t["name"].lower() == test.topic.lower():
+            for b in t.get("badges", []):
+                if b["level"] == test.level:
+                    slugs = [q["slug"] for q in b.get("questions", []) if q["slug"] not in KNOWN_PREMIUM_SLUGS]
+                    curated_candidates = db.query(Problem).filter(
+                        Problem.id.in_(slugs),
+                        Problem.id.notin_(KNOWN_PREMIUM_SLUGS),
+                        Problem.is_premium == False
+                    ).all()
+                    break
+            break
+
+    # Exclude current problems if other candidates exist
+    other_candidates = [p for p in curated_candidates if p.id not in [test.problem1_id, test.problem2_id]]
+    if len(other_candidates) >= 2:
+        selected = random.sample(other_candidates, 2)
+    elif len(curated_candidates) >= 2:
+        selected = random.sample(curated_candidates, 2)
+    else:
+        topic_clean = test.topic.replace("Arrays & Hashing", "Array").replace("Trees & BST", "Tree").replace("Graphs", "Graph")
+        raw_problems = db.query(Problem).filter(
+            Problem.topics.like(f"%{topic_clean}%"),
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS),
+            Problem.is_premium == False
+        ).all()
+        problems = filter_problems_for_topic(raw_problems, test.topic)
+        target_diffs = ["Easy"] if test.level == 1 else ["Medium"] if test.level in [2, 3] else ["Medium", "Hard"] if test.level == 4 else ["Hard"]
+        pool = [p for p in problems if p.difficulty in target_diffs and not p.is_premium and p.id not in KNOWN_PREMIUM_SLUGS]
+        other_pool = [p for p in pool if p.id not in [test.problem1_id, test.problem2_id]]
+        if len(other_pool) >= 2:
+            selected = random.sample(other_pool, 2)
+        elif len(pool) >= 2:
+            selected = random.sample(pool, 2)
+        else:
+            all_prob = db.query(Problem).filter(Problem.is_premium == False, Problem.id.notin_(KNOWN_PREMIUM_SLUGS)).all()
+            selected = random.sample(all_prob, 2) if len(all_prob) >= 2 else all_prob[:2]
+
+    if len(selected) < 2:
+        raise HTTPException(status_code=500, detail="Not enough candidate problems to reset test.")
+
+    test.problem1_id = selected[0].id
+    test.problem2_id = selected[1].id
+    test.problem1_solved = False
+    test.problem2_solved = False
+    test.start_time = get_utc_now()
+    db.commit()
+    db.refresh(test)
+
+    now = get_utc_now()
+    time_limit = getattr(test, 'time_limit_seconds', 5400) or 5400
+    elapsed = int((now - test.start_time).total_seconds())
+
+    return BadgeTestSchema(
+        id=test.id,
+        topic=test.topic,
+        level=test.level,
+        status=test.status,
+        problem1=BadgeTestProblemSchema(id=selected[0].id, title=selected[0].title, url=selected[0].url, difficulty=selected[0].difficulty),
+        problem2=BadgeTestProblemSchema(id=selected[1].id, title=selected[1].title, url=selected[1].url, difficulty=selected[1].difficulty),
+        problem1_solved=test.problem1_solved,
+        problem2_solved=test.problem2_solved,
+        time_limit_seconds=time_limit,
+        elapsed_seconds=elapsed,
+        start_time=test.start_time,
+        end_time=test.end_time
+    )
+
+
 @app.post("/badge-test/submit")
 def submit_badge_test(db: Session = Depends(get_db)):
     test = db.query(BadgeTest).filter(BadgeTest.status.in_(["active", "passed"])).order_by(BadgeTest.id.desc()).first()

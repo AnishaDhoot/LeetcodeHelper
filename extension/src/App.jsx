@@ -139,6 +139,20 @@ export default function App() {
     });
   };
 
+  const resetBadgeTestQuestions = () => {
+    if (!window.confirm('Reset the questions for this Badge Test? You will receive 2 new questions.')) return;
+    chrome.runtime.sendMessage({ action: 'reset_badge_test_questions' }, (res) => {
+      if (res && res.success && res.data) {
+        setActiveTest(res.data);
+        if (window.dsaTutor?.resetEditor) {
+          window.dsaTutor.resetEditor();
+        }
+      } else {
+        alert(res?.error || 'Failed to reset badge test questions.');
+      }
+    });
+  };
+
   const submitBadgeTest = () => {
     chrome.runtime.sendMessage({ action: 'submit_badge_test' }, (res) => {
       setShowBadgeSubmitConfirm(false);
@@ -1345,16 +1359,24 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginTop: '12px' }}>
+              <button
+                className="abandon-btn"
+                style={{ color: '#60a5fa', borderColor: '#3b82f666' }}
+                onClick={resetBadgeTestQuestions}
+                title="Reroll/generate 2 new questions for this Badge Test"
+              >
+                🔄 Reset Questions
+              </button>
+              <button className="abandon-btn" onClick={abandonBadgeTest}>
+                Abandon Test
+              </button>
               <button
                 className="coach-btn"
                 style={{ padding: '6px 14px', fontSize: '11px', background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
                 onClick={() => setShowBadgeSubmitConfirm(true)}
               >
                 Submit Test
-              </button>
-              <button className="abandon-btn" onClick={abandonBadgeTest}>
-                Abandon Test
               </button>
             </div>
           </div>

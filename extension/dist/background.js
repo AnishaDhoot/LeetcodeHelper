@@ -402,6 +402,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "reset_badge_test_questions") {
+    backendFetch("/badge-test/reset-questions", { method: "POST" })
+      .then((data) => sendResponse({ success: true, data }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (request.action === "submit_badge_test") {
     backendFetch("/badge-test/submit", { method: "POST" })
       .then((data) => sendResponse({ success: true, data }))
