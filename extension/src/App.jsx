@@ -127,15 +127,15 @@ export default function App() {
   };
 
   const [showBadgeSubmitConfirm, setShowBadgeSubmitConfirm] = useState(false);
+  const [showBadgeAbandonConfirm, setShowBadgeAbandonConfirm] = useState(false);
 
   const abandonBadgeTest = () => {
-    if (!window.confirm('Are you sure you want to abandon this Badge Test? All progress for this test will be lost.')) return;
+    setShowBadgeAbandonConfirm(false);
     chrome.runtime.sendMessage({ action: 'abandon_badge_test' }, (res) => {
-      if (res && res.success) {
-        setActiveTest(null);
-        setActiveTab('mastery');
-        fetchMastery();
-      }
+      setActiveTest(null);
+      setActiveTab('mastery');
+      fetchMastery();
+      window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked: false }, '*');
     });
   };
 
@@ -1395,7 +1395,7 @@ export default function App() {
               >
                 Submit Test
               </button>
-              <button className="abandon-btn" onClick={abandonBadgeTest}>
+              <button className="abandon-btn" onClick={() => setShowBadgeAbandonConfirm(true)}>
                 Abandon Test
               </button>
             </div>
@@ -2723,6 +2723,64 @@ export default function App() {
             <button className="coach-btn" onClick={() => setShowScorecardModal(false)} style={{ width: '100%' }}>
               Close Scorecard
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Badge Test Submit Confirmation Modal */}
+      {showBadgeSubmitConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '340px', padding: '18px', color: '#f4f4f5', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }}>
+            <div style={{ fontSize: '24px', marginBottom: '8px' }}>🏁</div>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px', color: '#22c55e' }}>Submit Badge Test?</h3>
+            <p style={{ fontSize: '12px', color: '#a1a1aa', margin: '0 0 16px 0', lineHeight: '1.4' }}>
+              Are you ready to submit your test for evaluation? Both problems must be solved in LeetCode to pass.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+              <button
+                className="coach-btn"
+                style={{ flex: 1, background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
+                onClick={submitBadgeTest}
+              >
+                Yes, Submit Test
+              </button>
+              <button
+                className="abandon-btn"
+                style={{ flex: 1 }}
+                onClick={() => setShowBadgeSubmitConfirm(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Badge Test Abandon Confirmation Modal */}
+      {showBadgeAbandonConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#0e0e10', border: '1px solid #ef444466', borderRadius: '12px', width: '100%', maxWidth: '340px', padding: '18px', color: '#f4f4f5', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }}>
+            <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠️</div>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px', color: '#f87171' }}>Abandon Badge Test?</h3>
+            <p style={{ fontSize: '12px', color: '#a1a1aa', margin: '0 0 16px 0', lineHeight: '1.4' }}>
+              Are you sure you want to exit and abandon this test? All active test progress will be lost and test integrity locks will be removed.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+              <button
+                className="coach-btn"
+                style={{ flex: 1, background: '#ef4444', color: '#ffffff', fontWeight: 'bold' }}
+                onClick={abandonBadgeTest}
+              >
+                Yes, Exit Test
+              </button>
+              <button
+                className="abandon-btn"
+                style={{ flex: 1 }}
+                onClick={() => setShowBadgeAbandonConfirm(false)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

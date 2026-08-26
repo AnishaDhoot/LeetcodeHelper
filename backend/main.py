@@ -811,7 +811,7 @@ def get_active_badge_test(db: Session = Depends(get_db)):
 
 @app.post("/badge-test/abandon")
 def abandon_badge_test(db: Session = Depends(get_db)):
-    test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    test = db.query(BadgeTest).filter(BadgeTest.status.in_(["active", "passed"])).first()
     if not test:
         raise HTTPException(status_code=404, detail="No active Badge Test found.")
     test.status = "abandoned"
