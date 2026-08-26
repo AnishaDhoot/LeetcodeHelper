@@ -364,9 +364,14 @@ const checkNodeForVerdict = (node) => {
         return;
       }
 
-      // STRICT CHECK 2: User MUST have initiated a real submit action (Submit button or Ctrl+Enter) within the last 45 seconds
+      // Check if inside a real submission result card OR user submitted recently
+      const isSubmissionContainer = !!node.closest(
+        '[data-e2e-locator="submission-result"], [class*="submission-result"], [class*="status-accepted"], [class*="result_container"], div[data-layout-path*="submission"], div[data-layout-path*="result"]'
+      );
       const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
-      if (lastSubmitClickTimestamp === 0 || timeSinceSubmit > 45000) {
+      const isRecentSubmit = lastSubmitClickTimestamp > 0 && timeSinceSubmit <= 90000;
+
+      if (!isSubmissionContainer && !isRecentSubmit && lastSubmitClickTimestamp !== 0) {
         return;
       }
 

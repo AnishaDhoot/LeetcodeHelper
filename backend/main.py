@@ -384,10 +384,9 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
 
     is_success = (req.verdict.lower() in ["accepted", "success"])
 
-    # If successful, set is_solved and solved_live in problem
+    # If successful, set is_solved in problem
     if is_success:
         problem.is_solved = True
-        problem.solved_live = True
 
     badge_award_payload = None
     # Check badge test progress before modifying TopicMastery rating
@@ -801,6 +800,13 @@ def get_active_badge_test(db: Session = Depends(get_db)):
     p1 = db.query(Problem).filter(Problem.id == test.problem1_id).first()
     p2 = db.query(Problem).filter(Problem.id == test.problem2_id).first()
 
+    p1_is_solved = bool(test.problem1_solved or (p1 and p1.is_solved))
+    p2_is_solved = bool(test.problem2_solved or (p2 and p2.is_solved))
+    if test.problem1_solved != p1_is_solved or test.problem2_solved != p2_is_solved:
+        test.problem1_solved = p1_is_solved
+        test.problem2_solved = p2_is_solved
+        db.commit()
+
     return BadgeTestSchema(
         id=test.id,
         topic=test.topic,
@@ -912,10 +918,18 @@ def submit_badge_test(db: Session = Depends(get_db)):
     if not test:
         raise HTTPException(status_code=404, detail="No active Badge Test found.")
     
+    p1 = db.query(Problem).filter(Problem.id == test.problem1_id).first()
+    p2 = db.query(Problem).filter(Problem.id == test.problem2_id).first()
+    if p1 and p1.is_solved:
+        test.problem1_solved = True
+    if p2 and p2.is_solved:
+        test.problem2_solved = True
+
     test.end_time = get_utc_now()
     if test.problem1_solved and test.problem2_solved:
         test.status = "passed"
-        mastery = db.query(TopicMastery).filter(TopicMastery.topic == test.topic).first()
+        canonical_topic = normalize_topic(test.topic)
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == canonical_topic).first()
         if mastery:
             mastery.level = test.level
             mastery.rating = max(mastery.rating, 800.0 + test.level * 240.0)
