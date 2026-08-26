@@ -425,19 +425,18 @@ const getCurrentLanguageSlug = () => {
   return 'python3';
 };
 
-const codeSnippetCache = new Map();
 const resetCooldownBySlug = new Map();
 let isResettingCode = false;
 
-// Full multi-strategy reset function to restore clean default boilerplate
-const resetMonacoToStarterCode = async () => {
+// Full multi-strategy reset function to restore clean default boilerplate using native LeetCode reset
+const resetMonacoToStarterCode = () => {
   const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
   const slug = match ? match[1] : null;
   if (!slug) return;
 
   const now = Date.now();
   const lastReset = resetCooldownBySlug.get(slug) || 0;
-  if (now - lastReset < 3000) {
+  if (now - lastReset < 2500) {
     return; // Rate limit guard
   }
   resetCooldownBySlug.set(slug, now);
@@ -445,73 +444,39 @@ const resetMonacoToStarterCode = async () => {
   if (isResettingCode) return;
   isResettingCode = true;
 
-  console.log(`[DSA Tutor Injected] Executing clean starter code reset for ${slug}...`);
-
   try {
-    // Strategy 1: Check cache or fetch GraphQL codeSnippets once
-    let snippets = codeSnippetCache.get(slug);
-    if (!snippets) {
-      const res = await fetch("https://leetcode.com/graphql/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: `query questionData($titleSlug: String!) {
-            question(titleSlug: $titleSlug) {
-              codeSnippets {
-                lang
-                langSlug
-                code
-              }
-            }
-          }`,
-          variables: { titleSlug: slug }
-        })
-      });
-
-      if (res.ok) {
-        const json = await res.json();
-        snippets = json?.data?.question?.codeSnippets || [];
-        if (snippets.length > 0) {
-          codeSnippetCache.set(slug, snippets);
-        }
-      }
-    }
-
-    if (snippets && snippets.length > 0) {
-      const activeLang = getCurrentLanguageSlug();
-      const matchSnippet = snippets.find(s => 
-        s.langSlug === activeLang || 
-        s.lang.toLowerCase() === activeLang ||
-        s.langSlug.includes(activeLang) ||
-        activeLang.includes(s.langSlug)
-      ) || snippets[0];
-
-      if (matchSnippet && matchSnippet.code && window.monaco?.editor) {
-        const models = window.monaco.editor.getModels() || [];
-        const validModels = models.filter(m => !m.uri.toString().includes("inmemory://testcase"));
-        const targetModel = validModels.length > 0 ? validModels[0] : models[0];
-        if (targetModel) {
-          targetModel.setValue(matchSnippet.code);
-        }
-      }
-    }
-
-    // Strategy 2: Click Native Reset to Default Code Button & Auto-Confirm Dialog (Single Try)
+    // Strategy: Click Native Reset to Default Code Button & Auto-Confirm Dialog
     const allButtons = Array.from(document.querySelectorAll(
-      'button[data-cypress="ResetCode"], button[aria-label*="Reset" i], button[title*="Reset" i], button[aria-label*="default" i], button[title*="default" i]'
+      'button[data-cypress="ResetCode"], button[aria-label*="Reset" i], button[title*="Reset" i], button[aria-label*="default" i], button[title*="default" i], button[title*="restore" i], button[aria-label*="restore" i]'
     ));
     let resetBtn = allButtons.find(el => !el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container"));
+    
+    if (!resetBtn) {
+      const editorHeaders = document.querySelectorAll('[class*="editor-header"], [class*="editor"] [class*="tools"], .monaco-editor, [class*="toolbar"]');
+      for (const bar of editorHeaders) {
+        const btns = bar.querySelectorAll('button, svg, [role="button"]');
+        for (const b of btns) {
+          const html = (b.outerHTML || '').toLowerCase();
+          if (html.includes('reset') || html.includes('rotate') || html.includes('default') || html.includes('undo')) {
+            resetBtn = b.closest('button, [role="button"]') || b;
+            break;
+          }
+        }
+        if (resetBtn) break;
+      }
+    }
+
     if (resetBtn) {
       resetBtn.click();
       setTimeout(() => {
-        const confirmBtn = document.querySelector('button[data-cypress="Confirm"], [data-cy="confirm-btn"], div[role="dialog"] button.bg-red-500, div[role="dialog"] button.bg-primary');
+        const confirmBtn = document.querySelector('button[data-cypress="Confirm"], [data-cy="confirm-btn"], div[role="dialog"] button.bg-red-500, div[role="dialog"] button.bg-primary, div[role="dialog"] button');
         if (confirmBtn) confirmBtn.click();
       }, 150);
     }
   } catch (err) {
     console.warn("[DSA Tutor Injected] Error in resetMonacoToStarterCode:", err);
   } finally {
-    isResettingCode = false;
+    setTimeout(() => { isResettingCode = false; }, 500);
   }
 };
 

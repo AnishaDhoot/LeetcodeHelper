@@ -1290,7 +1290,9 @@ export default function App() {
                 }}
                 onClick={() => {
                   if (activeTest.problem1?.url && currentProblemId !== activeTest.problem1.id) {
-                    window.location.href = activeTest.problem1.url;
+                    chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem1.url }, (res) => {
+                      if (!res || !res.success) window.location.href = activeTest.problem1.url;
+                    });
                   }
                 }}
               >
@@ -1317,7 +1319,9 @@ export default function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (activeTest.problem1?.url) {
-                          window.location.href = activeTest.problem1.url;
+                          chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem1.url }, (res) => {
+                            if (!res || !res.success) window.location.href = activeTest.problem1.url;
+                          });
                         }
                       }}
                     >
@@ -1341,7 +1345,9 @@ export default function App() {
                 }}
                 onClick={() => {
                   if (activeTest.problem2?.url && currentProblemId !== activeTest.problem2.id) {
-                    window.location.href = activeTest.problem2.url;
+                    chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem2.url }, (res) => {
+                      if (!res || !res.success) window.location.href = activeTest.problem2.url;
+                    });
                   }
                 }}
               >
@@ -1368,7 +1374,9 @@ export default function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (activeTest.problem2?.url) {
-                          window.location.href = activeTest.problem2.url;
+                          chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem2.url }, (res) => {
+                            if (!res || !res.success) window.location.href = activeTest.problem2.url;
+                          });
                         }
                       }}
                     >

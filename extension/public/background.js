@@ -402,10 +402,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === "reset_badge_test_questions") {
-    backendFetch("/badge-test/reset-questions", { method: "POST" })
-      .then((data) => sendResponse({ success: true, data }))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
+  if (request.action === "navigate_tab") {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs[0] && tabs[0].id) {
+        chrome.tabs.update(tabs[0].id, { url: request.url }, () => {
+          sendResponse({ success: true });
+        });
+      } else {
+        sendResponse({ success: false, error: "No active tab found" });
+      }
+    });
     return true;
   }
 
