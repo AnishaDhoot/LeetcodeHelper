@@ -834,25 +834,15 @@ export default function App() {
             clearCurrentCoachState();
             fetchProblemDetails(identity.problemId);
 
-            // If active badge test is running and moving to a new question, reset editor
+            // If active badge test is running and moving to a new question, reset editor once
             if (activeTest && window.dsaTutor?.resetEditor) {
-              [200, 600, 1200, 2200].forEach(d => {
-                setTimeout(() => {
-                  if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
-                }, d);
-              });
+              window.dsaTutor.resetEditor();
             }
 
             // If active mock interview is running and strategy is not submitted, lock & reset editor
             if (isMockMode && mockSession && !mockApproachSubmitted) {
               if (window.dsaTutor?.setEditorReadOnly) window.dsaTutor.setEditorReadOnly(true);
-              if (window.dsaTutor?.resetEditor) {
-                [200, 600, 1200, 2200].forEach(d => {
-                  setTimeout(() => {
-                    if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
-                  }, d);
-                });
-              }
+              if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
             }
           }
         }
@@ -1286,7 +1276,24 @@ export default function App() {
             </div>
             
             <div className="test-mode-problem-list">
-              <div className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', marginBottom: '8px' }}>
+              <div
+                className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  marginBottom: '8px',
+                  cursor: 'pointer',
+                  border: currentProblemId === activeTest.problem1.id ? '1px solid #3b82f6' : undefined,
+                  background: currentProblemId === activeTest.problem1.id ? 'rgba(59, 130, 246, 0.08)' : undefined
+                }}
+                onClick={() => {
+                  if (activeTest.problem1?.url && currentProblemId !== activeTest.problem1.id) {
+                    window.location.href = activeTest.problem1.url;
+                  }
+                }}
+              >
                 <div style={{ flex: 1, marginRight: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '13px', fontWeight: '700', color: activeTest.problem1_solved ? '#4ade80' : '#f4f4f5' }}>
@@ -1298,27 +1305,46 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {activeTest.problem1_solved ? (
-                    <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '3px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
+                  {activeTest.problem1_solved && (
+                    <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '2px 6px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
+                  )}
+                  {currentProblemId === activeTest.problem1.id ? (
+                    <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
                   ) : (
                     <button
                       className="coach-btn"
-                      style={{ fontSize: '11px', padding: '5px 10px', background: currentProblemId === activeTest.problem1.id ? '#3b82f6' : '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
+                      style={{ fontSize: '11px', padding: '4px 9px', background: '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
                       onClick={(e) => {
-                        e.preventDefault();
-                        if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
-                        if (activeTest.problem1.url) {
+                        e.stopPropagation();
+                        if (activeTest.problem1?.url) {
                           window.location.href = activeTest.problem1.url;
                         }
                       }}
                     >
-                      {currentProblemId === activeTest.problem1.id ? '📍 Active' : 'Solve ➔'}
+                      Switch ➔
                     </button>
                   )}
                 </div>
               </div>
 
-              <div className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', marginBottom: '8px' }}>
+              <div
+                className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '10px 12px',
+                  marginBottom: '8px',
+                  cursor: 'pointer',
+                  border: currentProblemId === activeTest.problem2.id ? '1px solid #3b82f6' : undefined,
+                  background: currentProblemId === activeTest.problem2.id ? 'rgba(59, 130, 246, 0.08)' : undefined
+                }}
+                onClick={() => {
+                  if (activeTest.problem2?.url && currentProblemId !== activeTest.problem2.id) {
+                    window.location.href = activeTest.problem2.url;
+                  }
+                }}
+              >
                 <div style={{ flex: 1, marginRight: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '13px', fontWeight: '700', color: activeTest.problem2_solved ? '#4ade80' : '#f4f4f5' }}>
@@ -1330,21 +1356,23 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {activeTest.problem2_solved ? (
-                    <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '3px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
+                  {activeTest.problem2_solved && (
+                    <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '2px 6px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
+                  )}
+                  {currentProblemId === activeTest.problem2.id ? (
+                    <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
                   ) : (
                     <button
                       className="coach-btn"
-                      style={{ fontSize: '11px', padding: '5px 10px', background: currentProblemId === activeTest.problem2.id ? '#3b82f6' : '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
+                      style={{ fontSize: '11px', padding: '4px 9px', background: '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
                       onClick={(e) => {
-                        e.preventDefault();
-                        if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
-                        if (activeTest.problem2.url) {
+                        e.stopPropagation();
+                        if (activeTest.problem2?.url) {
                           window.location.href = activeTest.problem2.url;
                         }
                       }}
                     >
-                      {currentProblemId === activeTest.problem2.id ? '📍 Active' : 'Solve ➔'}
+                      Switch ➔
                     </button>
                   )}
                 </div>

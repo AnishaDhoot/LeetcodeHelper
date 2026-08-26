@@ -425,17 +425,32 @@ const getCurrentLanguageSlug = () => {
   return 'python3';
 };
 
+const codeSnippetCache = new Map();
+const resetCooldownBySlug = new Map();
+let isResettingCode = false;
+
 // Full multi-strategy reset function to restore clean default boilerplate
 const resetMonacoToStarterCode = async () => {
-  console.log("[DSA Tutor Injected] Executing full Monaco editor reset to default template...");
-  
   const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
   const slug = match ? match[1] : null;
+  if (!slug) return;
 
-  // Strategy 1: Direct GraphQL Snippet Retrieval & Model Injection
-  if (slug) {
-    try {
-      const activeLang = getCurrentLanguageSlug();
+  const now = Date.now();
+  const lastReset = resetCooldownBySlug.get(slug) || 0;
+  if (now - lastReset < 3000) {
+    return; // Rate limit guard
+  }
+  resetCooldownBySlug.set(slug, now);
+
+  if (isResettingCode) return;
+  isResettingCode = true;
+
+  console.log(`[DSA Tutor Injected] Executing clean starter code reset for ${slug}...`);
+
+  try {
+    // Strategy 1: Check cache or fetch GraphQL codeSnippets once
+    let snippets = codeSnippetCache.get(slug);
+    if (!snippets) {
       const res = await fetch("https://leetcode.com/graphql/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -455,117 +470,54 @@ const resetMonacoToStarterCode = async () => {
 
       if (res.ok) {
         const json = await res.json();
-        const snippets = json?.data?.question?.codeSnippets || [];
+        snippets = json?.data?.question?.codeSnippets || [];
         if (snippets.length > 0) {
-          const matchSnippet = snippets.find(s => 
-            s.langSlug === activeLang || 
-            s.lang.toLowerCase() === activeLang ||
-            s.langSlug.includes(activeLang) ||
-            activeLang.includes(s.langSlug)
-          ) || snippets[0];
-
-          if (matchSnippet && matchSnippet.code) {
-            console.log(`[DSA Tutor Injected] Applying clean starter code for ${matchSnippet.langSlug}...`);
-            if (window.monaco?.editor) {
-              const models = window.monaco.editor.getModels() || [];
-              const validModels = models.filter(m => !m.uri.toString().includes("inmemory://testcase"));
-              const targetModel = validModels.length > 0 ? validModels[0] : models[0];
-              if (targetModel) {
-                targetModel.setValue(matchSnippet.code);
-              }
-            }
-          }
+          codeSnippetCache.set(slug, snippets);
         }
       }
-    } catch (err) {
-      console.warn("[DSA Tutor Injected] GraphQL snippet fetch error:", err);
     }
-  }
 
-  // Strategy 2: Click Native Reset to Default Code Button & Auto-Confirm Dialog
-  const triggerNativeResetClick = () => {
+    if (snippets && snippets.length > 0) {
+      const activeLang = getCurrentLanguageSlug();
+      const matchSnippet = snippets.find(s => 
+        s.langSlug === activeLang || 
+        s.lang.toLowerCase() === activeLang ||
+        s.langSlug.includes(activeLang) ||
+        activeLang.includes(s.langSlug)
+      ) || snippets[0];
+
+      if (matchSnippet && matchSnippet.code && window.monaco?.editor) {
+        const models = window.monaco.editor.getModels() || [];
+        const validModels = models.filter(m => !m.uri.toString().includes("inmemory://testcase"));
+        const targetModel = validModels.length > 0 ? validModels[0] : models[0];
+        if (targetModel) {
+          targetModel.setValue(matchSnippet.code);
+        }
+      }
+    }
+
+    // Strategy 2: Click Native Reset to Default Code Button & Auto-Confirm Dialog (Single Try)
     const allButtons = Array.from(document.querySelectorAll(
-      'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset" i], [title*="Reset" i], [aria-label*="default" i], [title*="default" i], [aria-label*="Restore" i], [title*="Restore" i]'
+      'button[data-cypress="ResetCode"], button[aria-label*="Reset" i], button[title*="Reset" i], button[aria-label*="default" i], button[title*="default" i]'
     ));
-
-    let resetBtn = allButtons.find(el => {
-      if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
-      const str = (
-        (el.getAttribute('title') || '') + ' ' +
-        (el.getAttribute('aria-label') || '') + ' ' +
-        (el.getAttribute('data-cypress') || '') + ' ' +
-        (el.getAttribute('data-cy') || '') + ' ' +
-        (el.getAttribute('data-track-name') || '') + ' ' +
-        (el.textContent || '') + ' ' +
-        (el.innerHTML || '')
-      ).toLowerCase();
-
-      return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('rotate-ccw');
-    });
-
-    if (!resetBtn) {
-      const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"]');
-      for (const bar of editorToolbars) {
-        const btns = bar.querySelectorAll('button, svg, [role="button"]');
-        for (const b of btns) {
-          const html = (b.outerHTML || '').toLowerCase();
-          if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default')) {
-            resetBtn = b.closest('button, [role="button"]') || b;
-            break;
-          }
-        }
-        if (resetBtn) break;
-      }
-    }
-
+    let resetBtn = allButtons.find(el => !el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container"));
     if (resetBtn) {
       resetBtn.click();
-      [60, 150, 300, 550, 900, 1400].forEach(delay => {
-        setTimeout(() => {
-          const confirmBtns = Array.from(document.querySelectorAll(
-            'button, div[role="button"], [data-cypress="Confirm"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, div[role="dialog"] button'
-          ));
-          const confirmBtn = confirmBtns.find(b => {
-            if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
-            const txt = (b.textContent || '').trim().toLowerCase();
-            const cls = (b.className || '').toLowerCase();
-            return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm');
-          });
-          if (confirmBtn) confirmBtn.click();
-        }, delay);
-      });
+      setTimeout(() => {
+        const confirmBtn = document.querySelector('button[data-cypress="Confirm"], [data-cy="confirm-btn"], div[role="dialog"] button.bg-red-500, div[role="dialog"] button.bg-primary');
+        if (confirmBtn) confirmBtn.click();
+      }, 150);
     }
-  };
-
-  triggerNativeResetClick();
-  setTimeout(triggerNativeResetClick, 300);
-  setTimeout(triggerNativeResetClick, 800);
-
-  // Strategy 3: Clean up localStorage keys for the problem
-  try {
-    if (slug) {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.includes(slug) || key.includes("code_editor") || key.includes("autosave"))) {
-          // Do not delete global configs, only problem code cache
-          if (key.includes(slug)) {
-            localStorage.removeItem(key);
-          }
-        }
-      }
-    }
-  } catch (e) {}
-
-  if (window.__dsaTutorReadOnly) {
-    setTimeout(() => {
-      applyReadOnlyState(true);
-    }, 400);
+  } catch (err) {
+    console.warn("[DSA Tutor Injected] Error in resetMonacoToStarterCode:", err);
+  } finally {
+    isResettingCode = false;
   }
 };
 
 window.__dsaTutorResetEditor = resetMonacoToStarterCode;
 
-let lastResetAssessmentSlug = "";
+let lastKnownAssessmentSlug = "";
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     resetMonacoToStarterCode();
@@ -577,20 +529,26 @@ setInterval(() => {
   if (window.__dsaTutorReadOnly) {
     applyReadOnlyState(true);
   }
-}, 400);
+}, 500);
 
-// Continuously enforce assessment locking while assessment is active and auto-reset when entering new problem
+// Enforce assessment tab locking every 600ms (NO automatic GraphQL reset in loop)
 setInterval(() => {
   if (window.__dsaTutorAssessmentLocked) {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
+  }
+}, 600);
 
-    const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
-    const curSlug = match ? match[1] : "";
-    if (curSlug && curSlug !== lastResetAssessmentSlug) {
-      lastResetAssessmentSlug = curSlug;
+// Only reset editor when URL slug actually changes
+const checkAssessmentSlugChange = () => {
+  const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
+  const curSlug = match ? match[1] : "";
+  if (curSlug && curSlug !== lastKnownAssessmentSlug) {
+    lastKnownAssessmentSlug = curSlug;
+    if (window.__dsaTutorAssessmentLocked) {
       resetMonacoToStarterCode();
     }
-  } else {
-    lastResetAssessmentSlug = "";
   }
-}, 400);
+};
+
+window.addEventListener("popstate", checkAssessmentSlugChange);
+setInterval(checkAssessmentSlugChange, 1200);
