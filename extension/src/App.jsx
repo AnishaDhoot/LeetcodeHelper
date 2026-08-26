@@ -79,36 +79,24 @@ export default function App() {
       chrome.runtime.sendMessage({ action: 'start_badge_test', payload: { topic } }, (res) => {
         if (res && res.success && res.data) {
           setActiveTest(res.data);
-          setTestTimerSeconds(res.data.time_limit_seconds || 5400);
+          const timeLimit = res.data.time_limit_seconds || 5400;
+          const elapsed = res.data.elapsed_seconds || 0;
+          setTestTimerSeconds(Math.max(0, timeLimit - elapsed));
           setActiveTab('test');
           if (window.dsaTutor?.setAssessmentLocked) {
             window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
           }
           if (window.dsaTutor?.resetEditor) {
             window.dsaTutor.resetEditor();
-            [200, 600, 1200, 2200].forEach(d => {
-              setTimeout(() => {
-                if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
-              }, d);
-            });
           }
           if (res.data.problem1?.url) {
-            const urlMatch = window.location.href.match(/problems\/([^/]+)/);
-            const currentSlug = urlMatch ? urlMatch[1] : '';
-            if (currentSlug !== res.data.problem1.id) {
-              window.location.href = res.data.problem1.url;
-            }
-          }
-        } else if (res?.error && res.error.includes('Mock Interview is active')) {
-          if (window.confirm('A previous Mock Interview session is still open. Would you like to end the mock interview and start your Badge Test now?')) {
-            chrome.runtime.sendMessage({ action: 'mock_abandon' }, () => {
-              setIsMockMode(false);
-              setMockSession(null);
-              startBadgeTest(topic);
+            chrome.runtime.sendMessage({ action: 'navigate_tab', url: res.data.problem1.url }, (navRes) => {
+              if (!navRes || !navRes.success) window.location.href = res.data.problem1.url;
             });
           }
         } else {
-          alert(res?.error || 'Failed to start Badge Test.');
+          fetchActiveTest();
+          setActiveTab('test');
         }
       });
     };

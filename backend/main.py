@@ -677,6 +677,7 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         time_limit = getattr(active, 'time_limit_seconds', 5400) or 5400
         if elapsed > time_limit:
             active.status = "failed"
+            active.end_time = get_utc_now()
             db.commit()
         else:
             raise HTTPException(status_code=400, detail="A Badge Test is already active.")
