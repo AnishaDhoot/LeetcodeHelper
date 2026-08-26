@@ -403,15 +403,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "navigate_tab") {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs && tabs[0] && tabs[0].id) {
-        chrome.tabs.update(tabs[0].id, { url: request.url }, () => {
-          sendResponse({ success: true });
-        });
-      } else {
-        sendResponse({ success: false, error: "No active tab found" });
-      }
-    });
+    const tabId = sender.tab ? sender.tab.id : null;
+    if (tabId) {
+      chrome.tabs.update(tabId, { url: request.url }, () => {
+        sendResponse({ success: true });
+      });
+    } else {
+      chrome.tabs.query({ active: true }, (tabs) => {
+        if (tabs && tabs[0] && tabs[0].id) {
+          chrome.tabs.update(tabs[0].id, { url: request.url }, () => {
+            sendResponse({ success: true });
+          });
+        } else {
+          sendResponse({ success: false, error: "No active tab found" });
+        }
+      });
+    }
     return true;
   }
 

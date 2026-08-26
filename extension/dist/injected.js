@@ -225,14 +225,6 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
       /\/submissions\/\d+/.test(window.location.href)
     );
 
-    // If currently on a forbidden route, immediately redirect back to /description/
-    if (isLocked && isForbiddenRoute) {
-      const cleanUrl = window.location.href.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, "/description/");
-      if (cleanUrl !== window.location.href) {
-        window.location.replace(cleanUrl);
-      }
-    }
-
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
 
     if (isLocked) {
