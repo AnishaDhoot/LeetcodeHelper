@@ -253,6 +253,21 @@ During development, critical production-level bugs were identified, diagnosed, a
 * **Root Cause**: No automatic alert mechanism on LeetCode page load.
 * **Fix**: Injected a floating review reminder card on the bottom-left of LeetCode if background calls indicate reviews are due today.
 
+### Case Study 10: Filtering LeetCode Premium Problems Across the Entire Recommender Pipeline
+* **Symptom**: The adaptive recommender, spaced repetition reviews, and exploratory picks sometimes recommended paid/premium LeetCode problems (e.g. *Meeting Rooms II*, *Paint House*), locking out non-subscriber users.
+* **Root Cause**: `Problem.is_premium` was not uniformly checked across fallback `Pass D`, Spaced Repetition reviews, and exploration query branches. Additionally, several well-known premium slugs had `is_premium = False` in raw database seed data.
+* **Fix**: Centralized a `KNOWN_PREMIUM_SLUGS` constant in `backend/models.py` and strictly filtered all queries in `backend/recommender.py` with `Problem.is_premium == False` and `Problem.id.notin_(KNOWN_PREMIUM_SLUGS)`.
+
+### Case Study 11: Fairplay Privacy — Concealing Historical Submission Answers While Preserving Live Feedback
+* **Symptom**: During Mock Interviews and Badge Tests, users could open the LeetCode "Submissions" drawer or navigate to `/submissions/detail/` to inspect previously accepted code solutions.
+* **Root Cause**: Over-broad fairplay regexes either failed to block the submissions history drawer or blocked live `/submission` verdict requests, causing recursive page reload loops.
+* **Fix**: Refined `isForbiddenDOMElement` and `isForbiddenElement` in `main.jsx` and `injected.js` to specifically target past submission history, submission detail inspection panels, and solution drawers (`/submissions/detail/`, `div.submission-detail`, `div.submissions-list`) while explicitly exempting live action submit buttons and result banners.
+
+### Case Study 12: Badge Test Navigation Integrity & Celebratory Particle Award Modal
+* **Symptom**: Submitting a problem in a Badge Test triggered rate-limit warnings or kicked users out of the test questions panel, and passing both questions lacked visual feedback.
+* **Root Cause**: `setLoading` / `setDiagnosis` forced `setActiveTab('coach')`, kicking users out of the active test tab on submission. Additionally, `/badge-test/submit` only queried `status == "active"` instead of supporting `"passed"`.
+* **Fix**: Updated `window.dsaTutor` to prevent tab-switching during active tests, added direct Question 1 and Question 2 navigation cards with Monaco editor resets, and implemented a celebratory Badge Award modal with falling confetti particle animations, radiant glowing tier badges, and Elo score updates upon passing.
+
 ---
 
 ## 7. Interview Preparation Guide & Technical Q&A

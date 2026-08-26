@@ -219,6 +219,15 @@ const handleVerdictDetected = async (verdict, node) => {
           explanation: 'Submission succeeded! Great job.',
           suggested_action: 'Proceed to your next recommended problem.'
         });
+        if (window.dsaTutor?.fetchActiveTest) {
+          window.dsaTutor.fetchActiveTest();
+        }
+        if (window.dsaTutor?.fetchMastery) {
+          window.dsaTutor.fetchMastery();
+        }
+        if (response.data?.badge_test_result && window.dsaTutor?.showBadgeAwardModal) {
+          window.dsaTutor.showBadgeAwardModal(response.data.badge_test_result);
+        }
       } else {
         window.dsaTutor?.setError(response?.error || 'Failed to record success submission.');
       }
@@ -263,6 +272,9 @@ const handleVerdictDetected = async (verdict, node) => {
         explanation: response.data.explanation,
         suggested_action: response.data.suggested_action
       });
+      if (window.dsaTutor?.fetchActiveTest) {
+        window.dsaTutor.fetchActiveTest();
+      }
     } else {
       window.dsaTutor?.setError(response?.error || 'Failed to diagnose submission.');
     }
@@ -392,13 +404,14 @@ const injectDirectLockCSS = (isLocked) => {
       styleEl = document.createElement('style');
       styleEl.id = 'dsa-tutor-fairplay-css';
       styleEl.textContent = `
-        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"], a[href*="/submission"],
-        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submissions"], div[data-layout-path*="submission"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submissions"], [data-track-load*="submission"],
-        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submissions"], [data-key*="submission"],
+        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions/detail"],
+        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submission"], div[data-layout-path*="submissions"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submissions"],
+        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"], section[class*="submissions"] {
+        div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"], div[class*="submission-detail"],
+        section[class*="discussion"], section[class*="comment"], section[class*="community"] {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -440,23 +453,35 @@ const isForbiddenDOMElement = (el) => {
     const role = (curr.getAttribute ? curr.getAttribute('role') || '' : '').toLowerCase();
     const cls = (curr.className && typeof curr.className === 'string' ? curr.className : '').toLowerCase();
 
+    // NEVER lock the real submit button
+    const isSubmitActionBtn = (
+      curr.getAttribute?.('data-e2e-locator') === 'console-submit-button' ||
+      curr.getAttribute?.('data-cypress') === 'submit-code-btn' ||
+      text === 'submit' ||
+      text === 'submit code' ||
+      ((ariaLabel === 'submit' || title === 'submit') && (curr.tagName === 'BUTTON' || role === 'button'))
+    );
+    if (isSubmitActionBtn && !dataPath.includes('submission') && !cls.includes('tab')) {
+      return false;
+    }
+
     if (
       href.includes('/editorial') || href.includes('/solution') || href.includes('/solutions') ||
       href.includes('/discussion') || href.includes('/discussions') || href.includes('/community') ||
-      href.includes('/comments') || href.includes('/submission') || href.includes('/submissions') ||
+      href.includes('/comments') || href.includes('/submissions/detail') || /\/submissions\/\d+/.test(href) ||
       dataPath.includes('editorial') || dataPath.includes('solution') || dataPath.includes('discussion') ||
       dataPath.includes('community') || dataPath.includes('submission') ||
       dataKey.includes('editorial') || dataKey.includes('solution') || dataKey.includes('discussion') ||
       dataKey.includes('community') || dataKey.includes('submission') ||
       dataTrack.includes('editorial') || dataTrack.includes('solution') || dataTrack.includes('discussion') ||
-      dataTrack.includes('submission') ||
+      dataTrack.includes('submissions') ||
       (ariaLabel.includes('solution') && !ariaLabel.includes('submit')) ||
-      ariaLabel.includes('editorial') || ariaLabel.includes('discussion') || ariaLabel.includes('submission') ||
+      ariaLabel.includes('editorial') || ariaLabel.includes('discussion') ||
       ariaLabel.includes('community') || ariaLabel.includes('comment') ||
       (title.includes('solution') && !title.includes('submit')) ||
-      title.includes('editorial') || title.includes('discussion') || title.includes('submission') ||
-      idStr.includes('editorial') || idStr.includes('discussion') || idStr.includes('submission') ||
-      cls.includes('editorial') || cls.includes('solution') || cls.includes('discussion') || cls.includes('submission')
+      title.includes('editorial') || title.includes('discussion') ||
+      idStr.includes('editorial') || idStr.includes('discussion') ||
+      cls.includes('editorial') || cls.includes('solution') || cls.includes('discussion') || cls.includes('submissions-list') || cls.includes('submission-list')
     ) {
       return true;
     }
@@ -469,7 +494,7 @@ const isForbiddenDOMElement = (el) => {
         text === 'editorial' || text.startsWith('editorial') ||
         text === 'solutions' || text === 'solution' || text.startsWith('solutions') ||
         text === 'discussion' || text === 'discussions' || text.startsWith('discussion') ||
-        text === 'submissions' || text === 'submission' || text.startsWith('submissions') ||
+        text === 'submissions' || text === 'past submissions' || text === 'submission history' ||
         text === 'community' || text === 'comments'
       ) {
         return true;
@@ -490,14 +515,21 @@ const applyDirectTabLocking = (locked, reason = 'Badge Test') => {
 
   if (locked) {
     const curHref = window.location.href;
-    if (
-      curHref.includes('/editorial') ||
+    const isForbiddenRoute = (
       curHref.includes('/solution') ||
+      curHref.includes('/solutions') ||
+      curHref.includes('/editorial') ||
+      curHref.includes('/editorials') ||
       curHref.includes('/discussion') ||
+      curHref.includes('/discussions') ||
+      curHref.includes('/comments') ||
       curHref.includes('/community') ||
-      curHref.includes('/submission')
-    ) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions?)[^/]*\/?/gi, '/description/');
+      curHref.includes('/submissions/detail') ||
+      /\/submissions\/\d+/.test(curHref)
+    );
+
+    if (isForbiddenRoute) {
+      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, '/description/');
       if (cleanUrl !== curHref) {
         window.location.replace(cleanUrl);
       }
@@ -548,8 +580,21 @@ document.addEventListener('click', (e) => {
     applyDirectTabLocking(true, directAssessmentReason);
 
     const curHref = window.location.href;
-    if (curHref.includes('/editorial') || curHref.includes('/solution') || curHref.includes('/discussion') || curHref.includes('/submissions')) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions?)[^/]*\/?/gi, '/description/');
+    const isForbiddenRoute = (
+      curHref.includes('/solution') ||
+      curHref.includes('/solutions') ||
+      curHref.includes('/editorial') ||
+      curHref.includes('/editorials') ||
+      curHref.includes('/discussion') ||
+      curHref.includes('/discussions') ||
+      curHref.includes('/comments') ||
+      curHref.includes('/community') ||
+      curHref.includes('/submissions/detail') ||
+      /\/submissions\/\d+/.test(curHref)
+    );
+
+    if (isForbiddenRoute) {
+      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, '/description/');
       if (cleanUrl !== curHref) {
         window.location.replace(cleanUrl);
       }

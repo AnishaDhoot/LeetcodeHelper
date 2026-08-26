@@ -1,16 +1,73 @@
-# React + Vite
+# 🧩 CodeCoach Agent — Chrome Extension (Manifest V3)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+> A modern, high-performance Chrome Extension built with **React 18**, **Vite**, and **Shadow DOM Isolation**, designed to augment LeetCode with real-time AI code coaching, test-driven badge progression, fairplay locks, and 3-question mock interviews.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🏛️ Architecture & Tech Stack
 
-## React Compiler
+```
+   ┌────────────────────────────────────────────────────────┐
+   │             LeetCode Page (leetcode.com)               │
+   │  ┌──────────────────────────────────────────────────┐  │
+   │  │ Shadow DOM Root (#dsa-tutor-panel-root)          │  │
+   │  │   - React 18 UI Overlay (App.jsx)                │  │
+   │  │   - CSS Isolated Styles (index.css)              │  │
+   │  └────────────────────────┬─────────────────────────┘  │
+   └───────────────────────────┼────────────────────────────┘
+                               │ window.postMessage
+                               ▼
+   ┌────────────────────────────────────────────────────────┐
+   │             Page Context (injected.js)                 │
+   │   - Monaco Editor Model Memory Reader                  │
+   │   - Fairplay CSS Injection & Tab Concealment           │
+   │   - Editor Starter Code Resetting                      │
+   └───────────────────────────┬────────────────────────────┘
+                               │ chrome.runtime.sendMessage
+                               ▼
+   ┌────────────────────────────────────────────────────────┐
+   │       Background Service Worker (background.js)        │
+   │   - MV3 Event Routing & Background Alarms              │
+   │   - History Sync with Rate-Limit Throttling            │
+   │   - HTTP API Bridge (http://localhost:8000)            │
+   └────────────────────────────────────────────────────────┘
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the Oxlint configuration
+## 🚀 Key Features
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+1. **Shadow DOM Isolation**: The entire tutor interface is rendered inside an isolated Shadow DOM container to eliminate CSS style collisions between LeetCode and the extension.
+2. **Real-Time Submission Interceptor**: Employs a `MutationObserver` to capture verdicts (`Wrong Answer`, `Accepted`, `Time Limit Exceeded`) on live submissions and immediately runs diagnostics.
+3. **Fairplay Lock Engine**:
+   - Conceals editorials, solutions, and discussion tabs during active assessments.
+   - **Past Submissions Privacy**: Hides historical submission code and past solution drawers while preserving live submission feedback.
+   - **Monaco Reset**: Resets the code editor to default starter code when switching problems during tests.
+4. **Celebratory Badge Award Modal**: Renders an animated modal with falling confetti, glowing radiant tier badges, and Elo score updates when both Badge Test problems are solved.
+5. **Interactive Navigation**: Question 1 and Question 2 navigation cards with direct action buttons (`📍 Active` / `Solve ➔`) and live status indicators.
+
+---
+
+## 🛠️ Build & Installation
+
+### Build Extension
+```bash
+npm install
+npm run build
+```
+This bundles the extension into `dist/`.
+
+### Load into Chrome / Edge
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and choose `extension/dist`.
+4. Open any problem on [LeetCode](https://leetcode.com/problems/two-sum/) to use the extension.
+
+---
+
+## 🧪 Testing
+
+```bash
+npm test
+```
+Runs the Vitest suite covering UI components, accessibility, lifecycle hooks, and interaction safety.

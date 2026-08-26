@@ -1655,3 +1655,170 @@
   border-color: #3b82f6;
   background: #121214;
 }
+
+/* ── Celebration / Badge Awarded Modal ── */
+.celebration-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.celebration-modal-card {
+  position: relative;
+  background: linear-gradient(180deg, #18181b 0%, #09090b 100%);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 360px;
+  padding: 24px 20px;
+  color: #f4f4f5;
+  box-shadow: 0 0 35px rgba(251, 191, 36, 0.25), 0 20px 30px rgba(0, 0, 0, 0.8);
+  text-align: center;
+  overflow: hidden;
+  animation: popScale 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.celebration-confetti-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.confetti {
+  position: absolute;
+  top: -10px;
+  width: 6px;
+  height: 10px;
+  opacity: 0.9;
+  animation: confettiFall 2.2s ease-in-out infinite;
+}
+
+.confetti-0 { background: #fbbf24; }
+.confetti-1 { background: #60a5fa; }
+.confetti-2 { background: #4ade80; }
+.confetti-3 { background: #f43f5e; }
+.confetti-4 { background: #c084fc; }
+.confetti-5 { background: #38bdf8; }
+
+@keyframes confettiFall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(320px) rotate(720deg); opacity: 0; }
+}
+
+@keyframes popScale {
+  0% { transform: scale(0.7); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.6)); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 24px rgba(251, 191, 36, 0.9)); }
+}
+
+.celebration-badge-glow {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 76px;
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.25) 0%, rgba(24, 24, 27, 0) 70%);
+  border-radius: 50%;
+  margin-bottom: 8px;
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+.celebration-badge-emoji {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.celebration-badge-tier-tag {
+  display: inline-block;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.celebration-title {
+  margin: 4px 0 8px 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.3px;
+}
+
+.celebration-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d4d4d8;
+  margin: 0 0 14px 0;
+}
+
+.celebration-stat-box {
+  background: #111113;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.celebration-stat-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #a1a1aa;
+  letter-spacing: 0.5px;
+}
+
+.celebration-stat-val {
+  font-size: 14px;
+  font-weight: 800;
+  color: #4ade80;
+  margin-top: 2px;
+}
+
+.celebration-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.celebration-btn-primary {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  color: #09090b;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.celebration-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.45);
+}

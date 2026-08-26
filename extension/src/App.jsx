@@ -24,6 +24,7 @@ export default function App() {
   // Badge Test states
   const [activeTest, setActiveTest] = useState(null);
   const [testTimerSeconds, setTestTimerSeconds] = useState(5400); // 1.5 hours default
+  const [badgeAwardModal, setBadgeAwardModal] = useState(null);
 
   // Code Coach states (persistent per tool)
   const [approachResult, setApproachResult] = useState(null);
@@ -142,7 +143,17 @@ export default function App() {
     chrome.runtime.sendMessage({ action: 'submit_badge_test' }, (res) => {
       setShowBadgeSubmitConfirm(false);
       if (res && res.success) {
-        alert(res.data?.message || 'Badge Test submitted!');
+        if (res.data?.passed) {
+          setBadgeAwardModal({
+            topic: res.data.topic || activeTest?.topic,
+            level: res.data.level || activeTest?.level,
+            badge: res.data.badge || (activeTest?.level === 1 ? 'Bronze' : activeTest?.level === 2 ? 'Silver' : activeTest?.level === 3 ? 'Gold' : activeTest?.level === 4 ? 'Platinum' : 'Diamond'),
+            rating: res.data.rating,
+            message: res.data.message
+          });
+        } else {
+          alert(res.data?.message || 'Badge Test submitted. Both problems must be solved to earn the badge.');
+        }
         setActiveTest(null);
         setActiveTab('mastery');
         fetchMastery();
@@ -966,11 +977,21 @@ export default function App() {
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
     window.dsaTutor = Object.assign(window.dsaTutor || {}, {
+      fetchActiveTest: fetchActiveTest,
+      fetchMastery: fetchMastery,
+      showBadgeAwardModal: (awardData) => {
+        setBadgeAwardModal(awardData);
+        setActiveTest(null);
+        setActiveTab('mastery');
+        fetchMastery();
+      },
       setLoading: (isLoading) => {
         setLoading(isLoading);
         if (isLoading) {
           setIsOpen(true);
-          setActiveTab('coach');
+          if (!activeTest && !isMockMode) {
+            setActiveTab('coach');
+          }
           setDiagnosis(null);
           setError(null);
         }
@@ -979,7 +1000,9 @@ export default function App() {
         setLoading(false);
         setDiagnosis(diagResult);
         setIsOpen(true);
-        setActiveTab('coach');
+        if (!activeTest && !isMockMode) {
+          setActiveTab('coach');
+        }
         // Auto-diagnosis results go into the Code Coach result area too.
         setDiagnosisResult(diagResult);
         setCoachError(null);
@@ -998,7 +1021,9 @@ export default function App() {
         setLoading(false);
         setError(errMessage);
         setIsOpen(true);
-        setActiveTab('coach');
+        if (!activeTest && !isMockMode) {
+          setActiveTab('coach');
+        }
       },
       refreshData: () => {
         fetchMastery();
@@ -1255,62 +1280,66 @@ export default function App() {
             </div>
             
             <div className="test-mode-problem-list">
-              <div className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`}>
-                <div>
-                  <a
-                    href={activeTest.problem1.url}
-                    target="_self"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (window.dsaTutor?.resetEditor) {
-                        window.dsaTutor.resetEditor();
-                      }
-                      window.location.href = activeTest.problem1.url;
-                    }}
-                    className="badge-quest-link"
-                    style={{ fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
-                  >
-                    1. {activeTest.problem1.title}
-                  </a>
+              <div className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', marginBottom: '8px' }}>
+                <div style={{ flex: 1, marginRight: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: activeTest.problem1_solved ? '#4ade80' : '#f4f4f5' }}>
+                      1. {activeTest.problem1.title}
+                    </span>
+                  </div>
                   <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                    Difficulty: {activeTest.problem1.difficulty}
+                    Difficulty: <span style={{ color: activeTest.problem1.difficulty === 'Easy' ? '#4ade80' : activeTest.problem1.difficulty === 'Medium' ? '#fbbf24' : '#f87171', fontWeight: '600' }}>{activeTest.problem1.difficulty}</span>
                   </div>
                 </div>
-                <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {activeTest.problem1_solved ? (
-                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
+                    <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '3px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
                   ) : (
-                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
+                    <button
+                      className="coach-btn"
+                      style={{ fontSize: '11px', padding: '5px 10px', background: currentProblemId === activeTest.problem1.id ? '#3b82f6' : '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+                        if (activeTest.problem1.url) {
+                          window.location.href = activeTest.problem1.url;
+                        }
+                      }}
+                    >
+                      {currentProblemId === activeTest.problem1.id ? '📍 Active' : 'Solve ➔'}
+                    </button>
                   )}
                 </div>
               </div>
 
-              <div className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`}>
-                <div>
-                  <a
-                    href={activeTest.problem2.url}
-                    target="_self"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      if (window.dsaTutor?.resetEditor) {
-                        window.dsaTutor.resetEditor();
-                      }
-                      window.location.href = activeTest.problem2.url;
-                    }}
-                    className="badge-quest-link"
-                    style={{ fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}
-                  >
-                    2. {activeTest.problem2.title}
-                  </a>
+              <div className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', marginBottom: '8px' }}>
+                <div style={{ flex: 1, marginRight: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: activeTest.problem2_solved ? '#4ade80' : '#f4f4f5' }}>
+                      2. {activeTest.problem2.title}
+                    </span>
+                  </div>
                   <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                    Difficulty: {activeTest.problem2.difficulty}
+                    Difficulty: <span style={{ color: activeTest.problem2.difficulty === 'Easy' ? '#4ade80' : activeTest.problem2.difficulty === 'Medium' ? '#fbbf24' : '#f87171', fontWeight: '600' }}>{activeTest.problem2.difficulty}</span>
                   </div>
                 </div>
-                <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {activeTest.problem2_solved ? (
-                    <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>🟢 Solved</span>
+                    <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '3px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved</span>
                   ) : (
-                    <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 'bold' }}>🔴 Unsolved</span>
+                    <button
+                      className="coach-btn"
+                      style={{ fontSize: '11px', padding: '5px 10px', background: currentProblemId === activeTest.problem2.id ? '#3b82f6' : '#27272a', color: '#fff', border: '1px solid #3f3f46' }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+                        if (activeTest.problem2.url) {
+                          window.location.href = activeTest.problem2.url;
+                        }
+                      }}
+                    >
+                      {currentProblemId === activeTest.problem2.id ? '📍 Active' : 'Solve ➔'}
+                    </button>
                   )}
                 </div>
               </div>
@@ -2525,6 +2554,70 @@ export default function App() {
                 onClick={submitBadgeTest}
               >
                 Confirm Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Badge Awarded Celebration Modal */}
+      {badgeAwardModal && (
+        <div className="celebration-backdrop" onClick={() => setBadgeAwardModal(null)}>
+          <div className="celebration-modal-card" onClick={e => e.stopPropagation()}>
+            <div className="celebration-confetti-container">
+              {Array.from({ length: 28 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`confetti confetti-${i % 6}`}
+                  style={{
+                    left: `${(i * 3.6) + 1}%`,
+                    animationDelay: `${(i * 0.08).toFixed(2)}s`,
+                    animationDuration: `${1.6 + (i % 5) * 0.3}s`
+                  }}
+                />
+              ))}
+            </div>
+
+            <div className="celebration-badge-glow">
+              <div className="celebration-badge-emoji">
+                {getBadgeEmoji(badgeAwardModal.badge)}
+              </div>
+            </div>
+
+            <div className="celebration-badge-tier-tag">
+              LEVEL {badgeAwardModal.level} • {badgeAwardModal.badge?.toUpperCase()} BADGE
+            </div>
+
+            <h2 className="celebration-title">Badge Awarded! 🎉</h2>
+
+            <p className="celebration-desc">
+              Outstanding work! You successfully solved both test problems and unlocked the <strong>{badgeAwardModal.badge}</strong> badge for <strong>{badgeAwardModal.topic}</strong>!
+            </p>
+
+            {badgeAwardModal.rating && (
+              <div className="celebration-stat-box">
+                <div className="celebration-stat-label">TOPIC MASTERY ELO BOOST</div>
+                <div className="celebration-stat-val">📈 {Math.round(badgeAwardModal.rating)} Elo</div>
+              </div>
+            )}
+
+            <div className="celebration-actions">
+              <button
+                className="coach-btn celebration-btn-primary"
+                onClick={() => {
+                  setBadgeAwardModal(null);
+                  setActiveTab('mastery');
+                  fetchMastery();
+                }}
+              >
+                View in Topic Mastery ➔
+              </button>
+              <button
+                className="abandon-btn"
+                style={{ width: '100%', marginTop: '6px', textAlign: 'center', background: '#18181b', color: '#a1a1aa', border: '1px solid #27272a' }}
+                onClick={() => setBadgeAwardModal(null)}
+              >
+                Close & Continue
               </button>
             </div>
           </div>

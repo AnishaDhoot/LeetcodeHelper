@@ -11,7 +11,7 @@ def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition
+from backend.models import Problem, Attempt, TopicMastery, SpacedRepetition, KNOWN_PREMIUM_SLUGS
 
 # ---------------------------------------------------------------------------
 # Canonical Topic Map & Normalization Helper
@@ -404,7 +404,11 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
     reviews = []
     due_problem_ids = set()
     for r in reviews_due:
-        prob = db.query(Problem).filter(Problem.id == r.problem_id).first()
+        prob = db.query(Problem).filter(
+            Problem.id == r.problem_id,
+            Problem.is_premium == False,
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS)
+        ).first()
         if prob:
             reviews.append({
                 "problem_id": prob.id,
@@ -420,7 +424,10 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
 
     # 2. Build base problem pool (strictly non-premium — Tier 1.1)
     def _pool_query():
-        q = db.query(Problem).filter(Problem.is_premium == False)
+        q = db.query(Problem).filter(
+            Problem.is_premium == False,
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS)
+        )
         if company:
             q = q.filter(Problem.companies.like(f"%{company}%"))
         return q.all()
@@ -658,7 +665,10 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
 
     # Pass D: If company filter was applied and still fewer than 3 recommendations, fallback to all non-premium problems prioritized by focus/weak topics
     if len(recommendations) < 3 and company:
-        all_non_prem = db.query(Problem).filter(Problem.is_premium == False).all()
+        all_non_prem = db.query(Problem).filter(
+            Problem.is_premium == False,
+            Problem.id.notin_(KNOWN_PREMIUM_SLUGS)
+        ).all()
         all_non_prem_map = {p.id: p for p in all_non_prem}
         
         # Try focus topics first
@@ -712,6 +722,8 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
                 if exp_topic.topic in (p.topics or "")
                 and p.id not in recommended_ids
                 and p.id not in due_problem_ids
+                and not p.is_premium
+                and p.id not in KNOWN_PREMIUM_SLUGS
             ]
             if exp_probs:
                 ep = random.choice(exp_probs)

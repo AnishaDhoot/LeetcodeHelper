@@ -22,7 +22,7 @@ from backend.database import get_db, engine, Base
 from backend.models import (
     Problem, Attempt, TopicMastery, UserConfig, SpacedRepetition, DailyActivity, MockInterviewSession,
     BadgeTest, BadgeTestStartRequest, BadgeTestProblemSchema, BadgeTestSchema, CompanyMetadata,
-    SubmissionAnalyzeRequest, SubmissionAnalyzeResponse,
+    SubmissionAnalyzeRequest, SubmissionAnalyzeResponse, KNOWN_PREMIUM_SLUGS,
     ProblemRecommendResponse, TopicMasterySchema,
     CheckApproachRequest, CheckApproachResponse,
     GetHintRequest, GetHintResponse,
@@ -214,38 +214,6 @@ def _ensure_schema():
         db_conn.close()
 
 
-KNOWN_PREMIUM_SLUGS = {
-    "meeting-rooms", "meeting-rooms-ii", "alien-dictionary", "walls-and-gates",
-    "graph-valid-tree", "number-of-connected-components-in-an-undirected-graph",
-    "encode-and-decode-strings", "inorder-successor-in-bst", "inorder-successor-in-bst-ii",
-    "paint-house", "paint-house-ii", "paint-fence", "bomb-enemy", "design-tic-tac-toe",
-    "design-hit-counter", "design-search-autocomplete-system", "design-in-memory-file-system",
-    "find-leaves-of-binary-tree", "binary-tree-vertical-order-traversal", "shortest-word-distance",
-    "shortest-word-distance-ii", "shortest-word-distance-iii", "two-sum-iii-data-structure-design",
-    "two-sum-bsts", "two-sum-less-than-k", "group-shifted-strings", "count-univalue-subtrees",
-    "factor-combinations", "verify-preorder-sequence-in-binary-search-tree", "flatten-2d-vector",
-    "sparse-matrix-multiplication", "binary-tree-longest-consecutive-sequence",
-    "binary-tree-longest-consecutive-sequence-ii", "generalized-abbreviation",
-    "maximum-size-subarray-sum-equals-k", "nested-list-weight-sum", "nested-list-weight-sum-ii",
-    "longest-substring-with-at-most-k-distinct-characters",
-    "longest-substring-with-at-most-two-distinct-characters", "range-addition",
-    "line-reflection", "plus-one-linked-list", "sentence-screen-fitting", "sequence-reconstruction",
-    "ternary-expression-parser", "optimal-account-balancing", "kill-process",
-    "split-array-with-equal-sum", "boundary-of-binary-tree", "lonely-pixel-i", "lonely-pixel-ii",
-    "output-contest-matches", "encode-string-with-shortest-length", "bold-words-in-string",
-    "pour-water", "candy-crush", "closest-binary-search-tree-value", "closest-binary-search-tree-value-ii",
-    "valid-word-square", "word-squares", "maximum-average-subarray-ii", "design-compressed-string-iterator",
-    "add-bold-tag-in-string", "design-snake-game", "design-phone-directory", "logger-rate-limiter",
-    "android-unlock-patterns", "strobogrammatic-number", "strobogrammatic-number-ii",
-    "strobogrammatic-number-iii", "wiggle-sort", "palindrome-permutation", "palindrome-permutation-ii",
-    "read-n-characters-given-read4", "read-n-characters-given-read4-ii-call-multiple-times",
-    "one-edit-distance", "missing-ranges", "reverse-words-in-a-string-ii", "rearrange-string-k-distance-apart",
-    "max-consecutive-ones-ii", "dot-product-of-two-sparse-vectors", "binary-search-tree-iterator-ii",
-    "find-root-of-n-ary-tree", "buildings-with-an-ocean-view", "minimum-cost-to-connect-sticks",
-    "leftmost-column-with-at-least-a-one", "design-excel-sum-formula", "design-log-storage-system"
-}
-
-
 _ensure_schema()
 
 
@@ -417,33 +385,46 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
         problem.is_solved = True
         problem.solved_live = True
 
+    badge_award_payload = None
+    # Check badge test progress before modifying TopicMastery rating
+    active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    if active_test and (active_test.problem1_id == problem.id or active_test.problem2_id == problem.id) and is_success:
+        updated = False
+        if active_test.problem1_id == problem.id and not active_test.problem1_solved:
+            active_test.problem1_solved = True
+            updated = True
+        elif active_test.problem2_id == problem.id and not active_test.problem2_solved:
+            active_test.problem2_solved = True
+            updated = True
+
+        if updated and active_test.problem1_solved and active_test.problem2_solved:
+            active_test.status = "passed"
+            active_test.end_time = get_utc_now()
+            # Award badge!
+            mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
+            if mastery:
+                mastery.level = active_test.level
+                mastery.rating = max(mastery.rating, 800.0 + active_test.level * 240.0)
+                b_name = mastery.badge
+                r_val = mastery.rating
+            else:
+                badge_map = {1: "Bronze", 2: "Silver", 3: "Gold", 4: "Platinum", 5: "Diamond"}
+                b_name = badge_map.get(active_test.level, "Bronze")
+                r_val = 800.0 + active_test.level * 240.0
+            badge_award_payload = {
+                "topic": active_test.topic,
+                "level": active_test.level,
+                "badge": b_name,
+                "rating": r_val,
+                "message": f"Badge Test passed! Congratulations, you earned the {b_name} Badge for {active_test.topic}."
+            }
+            db.flush()
+
     # 2. Update topic mastery & daily streak activity for each individual topic
     topic_list = [t.strip() for t in (problem.topics or "Arrays & Hashing").split(",") if t.strip()]
     if not topic_list:
         topic_list = ["Arrays & Hashing"]
     for t in topic_list:
-        # Check badge test progress before modifying TopicMastery rating
-        active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
-        if active_test and (active_test.problem1_id == problem.id or active_test.problem2_id == problem.id) and is_success:
-            updated = False
-            if active_test.problem1_id == problem.id and not active_test.problem1_solved:
-                active_test.problem1_solved = True
-                updated = True
-            elif active_test.problem2_id == problem.id and not active_test.problem2_solved:
-                active_test.problem2_solved = True
-                updated = True
-
-            if updated:
-                if active_test.problem1_solved and active_test.problem2_solved:
-                    active_test.status = "passed"
-                    active_test.end_time = get_utc_now()
-                    # Award badge!
-                    mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
-                    if mastery:
-                        mastery.level = active_test.level
-                        mastery.rating = max(mastery.rating, 800.0 + active_test.level * 240.0)
-                    db.flush()
-
         update_mastery_on_submission(db, t, is_success=is_success, difficulty=problem.difficulty)
     _record_daily_activity(db, is_success=is_success)
 
@@ -457,7 +438,8 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
         return SubmissionAnalyzeResponse(
             root_cause_category=recent_attempt.root_cause_category or "none",
             explanation=recent_attempt.explanation_text or "Submission recorded.",
-            suggested_action="Proceed to your next recommended problem."
+            suggested_action="Proceed to your next recommended problem.",
+            badge_test_result=badge_award_payload
         )
 
     # 4. Handle success vs failure
@@ -478,7 +460,8 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
         return SubmissionAnalyzeResponse(
             root_cause_category="none",
             explanation="Submission succeeded! Great job on solving this problem.",
-            suggested_action="View the recommendation tab for your next challenge!"
+            suggested_action="View the recommendation tab for your next challenge!" if not badge_award_payload else "You unlocked a new badge! Check the celebration in your panel.",
+            badge_test_result=badge_award_payload
         )
 
     # For failures, check if an assessment (Badge Test or Mock Interview) is active
@@ -839,7 +822,7 @@ def abandon_badge_test(db: Session = Depends(get_db)):
 
 @app.post("/badge-test/submit")
 def submit_badge_test(db: Session = Depends(get_db)):
-    test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
+    test = db.query(BadgeTest).filter(BadgeTest.status.in_(["active", "passed"])).order_by(BadgeTest.id.desc()).first()
     if not test:
         raise HTTPException(status_code=404, detail="No active Badge Test found.")
     
@@ -850,10 +833,18 @@ def submit_badge_test(db: Session = Depends(get_db)):
         if mastery:
             mastery.level = test.level
             mastery.rating = max(mastery.rating, 800.0 + test.level * 240.0)
-        message = f"Badge Test passed! Congratulations, you earned the Level {test.level} Badge for {test.topic}."
+            badge_name = mastery.badge
+            rating_val = mastery.rating
+        else:
+            badge_map = {1: "Bronze", 2: "Silver", 3: "Gold", 4: "Platinum", 5: "Diamond"}
+            badge_name = badge_map.get(test.level, "Bronze")
+            rating_val = 800.0 + test.level * 240.0
+        message = f"Badge Test passed! Congratulations, you earned the {badge_name} Badge for {test.topic}."
         passed = True
     else:
         test.status = "failed"
+        badge_name = None
+        rating_val = None
         message = "Badge Test submitted. Both problems must be solved correctly to earn the badge."
         passed = False
     
@@ -862,6 +853,10 @@ def submit_badge_test(db: Session = Depends(get_db)):
         "status": "success",
         "test_status": test.status,
         "passed": passed,
+        "topic": test.topic,
+        "level": test.level,
+        "badge": badge_name,
+        "rating": rating_val,
         "message": message,
         "problem1_solved": test.problem1_solved,
         "problem2_solved": test.problem2_solved

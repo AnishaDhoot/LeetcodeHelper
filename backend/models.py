@@ -5,8 +5,39 @@ from pydantic import BaseModel, ConfigDict
 
 def get_utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-from typing import List, Optional
+from typing import List, Optional, Set
 from backend.database import Base
+
+KNOWN_PREMIUM_SLUGS: Set[str] = {
+    "meeting-rooms", "meeting-rooms-ii", "alien-dictionary", "walls-and-gates",
+    "graph-valid-tree", "number-of-connected-components-in-an-undirected-graph",
+    "encode-and-decode-strings", "inorder-successor-in-bst", "inorder-successor-in-bst-ii",
+    "paint-house", "paint-house-ii", "paint-fence", "bomb-enemy", "design-tic-tac-toe",
+    "design-hit-counter", "design-search-autocomplete-system", "design-in-memory-file-system",
+    "find-leaves-of-binary-tree", "binary-tree-vertical-order-traversal", "shortest-word-distance",
+    "shortest-word-distance-ii", "shortest-word-distance-iii", "two-sum-iii-data-structure-design",
+    "two-sum-bsts", "two-sum-less-than-k", "group-shifted-strings", "count-univalue-subtrees",
+    "factor-combinations", "verify-preorder-sequence-in-binary-search-tree", "flatten-2d-vector",
+    "sparse-matrix-multiplication", "binary-tree-longest-consecutive-sequence",
+    "binary-tree-longest-consecutive-sequence-ii", "generalized-abbreviation",
+    "maximum-size-subarray-sum-equals-k", "nested-list-weight-sum", "nested-list-weight-sum-ii",
+    "longest-substring-with-at-most-k-distinct-characters",
+    "longest-substring-with-at-most-two-distinct-characters", "range-addition",
+    "line-reflection", "plus-one-linked-list", "sentence-screen-fitting", "sequence-reconstruction",
+    "ternary-expression-parser", "optimal-account-balancing", "kill-process",
+    "split-array-with-equal-sum", "boundary-of-binary-tree", "lonely-pixel-i", "lonely-pixel-ii",
+    "output-contest-matches", "encode-string-with-shortest-length", "bold-words-in-string",
+    "pour-water", "candy-crush", "closest-binary-search-tree-value", "closest-binary-search-tree-value-ii",
+    "valid-word-square", "word-squares", "maximum-average-subarray-ii", "design-compressed-string-iterator",
+    "add-bold-tag-in-string", "design-snake-game", "design-phone-directory", "logger-rate-limiter",
+    "android-unlock-patterns", "strobogrammatic-number", "strobogrammatic-number-ii",
+    "strobogrammatic-number-iii", "wiggle-sort", "palindrome-permutation", "palindrome-permutation-ii",
+    "read-n-characters-given-read4", "read-n-characters-given-read4-ii-call-multiple-times",
+    "one-edit-distance", "missing-ranges", "reverse-words-in-a-string-ii", "rearrange-string-k-distance-apart",
+    "max-consecutive-ones-ii", "dot-product-of-two-sparse-vectors", "binary-search-tree-iterator-ii",
+    "find-root-of-n-ary-tree", "buildings-with-an-ocean-view", "minimum-cost-to-connect-sticks",
+    "leftmost-column-with-at-least-a-one", "design-excel-sum-formula", "design-log-storage-system"
+}
 
 # ==========================================
 # SQLAlchemy Models
@@ -256,6 +287,7 @@ class SubmissionAnalyzeResponse(BaseModel):
     root_cause_category: str
     explanation: str
     suggested_action: str
+    badge_test_result: Optional[dict] = None
 
 class RecommendationItem(BaseModel):
     problem_id: str

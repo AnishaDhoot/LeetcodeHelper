@@ -1,6 +1,6 @@
 # 🧠 CodeCoach Agent — Autonomous LeetCode Companion
 
-> An intelligent, autonomous Data Structures & Algorithms (DSA) CodeCoach overlay for LeetCode. Features conceptual failure diagnostics, test-driven badge topic mastery scoring, progressive hint revealing, timed 3-question mock interviews with verbal strategy gating, formal Badge Tests, spaced repetition reviews, and real-time interactive Code Coaching.
+> An intelligent, autonomous Data Structures & Algorithms (DSA) CodeCoach overlay for LeetCode. Features conceptual failure diagnostics, test-driven badge topic mastery scoring, progressive 3-stage hint revealing, timed 3-question mock interviews with verbal strategy gating, formal Badge Tests with celebratory badge unlocking modals, spaced repetition reviews, strict fairplay locks against past submission answers, and premium problem filtering.
 
 ---
 
@@ -18,6 +18,8 @@
 
 ### 2. Test-Driven Topic Mastery & Adaptive Recommender
 - **Badge Test Progression System**: Topic mastery levels ($0-5$) and badges (Bronze 🥉, Silver 🥈, Gold 🥇, Platinum 🛡️, Diamond 💎) are unlocked strictly by passing formal, timed **Badge Tests** (1.5 hours, 2 problems per test).
+- **Celebratory Badge Award Modal**: Upon completing both problems in a Badge Test, an animated celebration modal triggers with falling multi-color particle confetti, glowing radiant tier badges, and topic Elo boost metrics.
+- **Premium Problem Exclusion**: Automatically filters out LeetCode premium/paid-only questions across all recommendations, spaced repetition reviews, fallback queries, and exploratory modes.
 - **Productive Struggle Band**: Recommends problem difficulties (Easy $\rightarrow$ Medium $\rightarrow$ Hard) matched precisely to your unlocked badge level for that specific topic:
   - **Level 0 (Locked) & Level 1 (Bronze)**: Easy questions to build fundamental concepts.
   - **Level 2 (Silver) & Level 3 (Gold)**: Medium questions to deepen problem-solving skills.
@@ -43,12 +45,15 @@
 ### 5. Timed Mock Interview Simulator & Fairplay Protocol
 - **3-Question Interview Sessions**: Simulates real company interviews under a global 2-hour timer.
 - **Verbal Approach Gating**: Enforces real interview flow by locking the code editor (`readOnly` state + DOM lock overlay) until you submit a valid verbal strategy.
-- **Fairplay CSS Engine**: Automatically hides LeetCode solutions, editorials, discussion forums, and past submission tabs during active interview or badge test sessions.
+- **Fairplay Anti-Cheat Engine**:
+  - Automatically hides LeetCode solutions, editorials, and discussion forums during active assessment sessions.
+  - **Past Submissions Privacy**: Prevents viewing historical submission code, past solutions, and submission detail drawers (`/submissions/detail/`, `div.submission-detail`, `div.submissions-list`) during tests while preserving live submission verdicts.
+  - Automatically resets the Monaco editor to clean starter code when switching problems during tests.
 - **Automated Scorecards**: Evaluates candidate performance with a hiring verdict (`Strong Hire`, `Hire`, `Weak Lean`, `Needs Practice`), 1–5 subscores across strategy, code quality, and time management, plus actionable feedback.
 
 ### 6. Analytics, History Sync & Daily Quotas
 - **LeetCode History Sync**: Piggybacks on active LeetCode sessions to import all historical solved problems via `/api/problems/all/` REST calls and bulk GraphQL queries without hitting rate limits.
-- **Atomic Daily AI Quota Counter**: Enforces process-safe daily limits (default: 25 requests/day) via atomic SQL updates to prevent concurrent race conditions.
+- **Atomic Daily AI Quota Counter**: Enforces process-safe daily limits (default: 50 requests/day) via atomic SQL updates to prevent concurrent race conditions.
 - **Weekly Journal Export**: Generates a Markdown digest summarizing your past week's attempts, error categories, and review candidates.
 
 ---
@@ -85,8 +90,6 @@
    └────────────────────────────────────────────────────────┘
 ```
 
-
-
 ---
 
 ## 🛠️ Getting Started & Local Setup
@@ -106,13 +109,6 @@ cd LeetcodeHelper
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r backend/requirements.txt
-
-# Configuration (Optional)
-# Create or modify `.env` in the root or `backend/` directory:
-# GROQ_API_KEY=your_groq_api_key
-# GROQ_MODEL=openai/gpt-oss-20b
-# OLLAMA_MODEL=qwen2.5:7b
-# AI_DAILY_QUOTA_LIMIT=25
 
 # Start backend server
 powershell ./run_backend.ps1
@@ -138,14 +134,17 @@ This compiles the packed Chrome Manifest V3 extension into `extension/dist/`.
 
 ## 🧪 Running Diagnostic Tests
 
-To verify backend endpoints, database schema auto-migrations, and live AI Agent diagnostics:
+To verify backend endpoints, database schema auto-migrations, and AI Agent diagnostics:
 
-```bash
-# Run unit & API integration tests
-python -m pytest backend/test_api.py
+```powershell
+# Run full automated backend test suite (60 tests)
+$env:PYTHONPATH="."; python -m pytest backend/tests
 
-# Run live LLM diagnostic tests
-python -m pytest backend/test_llm.py
+# Run frontend tests
+cd extension; npm test
 ```
 
+---
 
+## 📄 License
+MIT License © 2026 Anisha Dhoot
