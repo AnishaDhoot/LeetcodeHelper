@@ -151,7 +151,7 @@ const scrapeConstraints = () => {
 
 // Extract current problem identity from URL + document title.
 const scrapeProblemIdentity = () => {
-  const urlMatch = window.location.href.match(/problems\/([^/]+)/);
+  const urlMatch = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
   const problemId = urlMatch ? urlMatch[1] : 'unknown-problem';
   const docTitle = document.title || '';
   const problemTitle = docTitle.split('-')[0].trim() || problemId;

@@ -363,14 +363,18 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
     Analyzes a failed submission or registers a successful one.
     Triggers LLM diagnosis for failures and updates mastery tracking.
     """
+    clean_problem_id = req.problem_id.strip().split('?')[0].split('#')[0].rstrip('/')
+
     # 1. Fetch or dynamically create the problem in the DB
-    problem = db.query(Problem).filter(Problem.id == req.problem_id).first()
+    problem = db.query(Problem).filter(Problem.id == clean_problem_id).first()
+    if not problem:
+        problem = db.query(Problem).filter(Problem.id == req.problem_id).first()
     if not problem:
         # Dynamically register the problem if not seeded
         problem = Problem(
-            id=req.problem_id,
+            id=clean_problem_id,
             title=req.problem_title,
-            url=f"https://leetcode.com/problems/{req.problem_id}/",
+            url=f"https://leetcode.com/problems/{clean_problem_id}/",
             difficulty="Medium", # Default
             topics="Arrays & Hashing" # Fallback topic
         )
@@ -388,12 +392,14 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
     badge_award_payload = None
     # Check badge test progress before modifying TopicMastery rating
     active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
-    if active_test and (active_test.problem1_id == problem.id or active_test.problem2_id == problem.id) and is_success:
+    if active_test and is_success:
+        p1_clean = active_test.problem1_id.strip().split('?')[0].split('#')[0].rstrip('/')
+        p2_clean = active_test.problem2_id.strip().split('?')[0].split('#')[0].rstrip('/')
         updated = False
-        if active_test.problem1_id == problem.id and not active_test.problem1_solved:
+        if clean_problem_id == p1_clean and not active_test.problem1_solved:
             active_test.problem1_solved = True
             updated = True
-        elif active_test.problem2_id == problem.id and not active_test.problem2_solved:
+        elif clean_problem_id == p2_clean and not active_test.problem2_solved:
             active_test.problem2_solved = True
             updated = True
 
@@ -401,7 +407,8 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
             active_test.status = "passed"
             active_test.end_time = get_utc_now()
             # Award badge!
-            mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
+            canonical_topic = normalize_topic(active_test.topic)
+            mastery = db.query(TopicMastery).filter(TopicMastery.topic == canonical_topic).first()
             if mastery:
                 mastery.level = active_test.level
                 mastery.rating = max(mastery.rating, 800.0 + active_test.level * 240.0)
