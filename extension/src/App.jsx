@@ -948,6 +948,24 @@ export default function App() {
     fetchActiveMock();
     fetchSyncedAccount();
     fetchSolvedProblems();
+    
+    // Poll URL slug and active test state periodically
+    const syncInterval = setInterval(() => {
+      if (typeof window !== 'undefined') {
+        const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
+        const slug = match ? match[1] : '';
+        setCurrentProblemId(slug);
+      }
+      chrome.runtime.sendMessage({ action: 'get_active_badge_test' }, (res) => {
+        if (res && res.success && res.data) {
+          setActiveTest(res.data);
+          const timeLimit = res.data.time_limit_seconds || 5400;
+          const elapsed = res.data.elapsed_seconds || 0;
+          const remaining = timeLimit - elapsed;
+          setTestTimerSeconds(remaining > 0 ? remaining : 0);
+        }
+      });
+    }, 2000);
 
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
