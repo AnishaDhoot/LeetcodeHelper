@@ -1039,6 +1039,12 @@ export default function App() {
           setActiveTab('coach');
         }
       },
+      resetEditor: () => {
+        window.postMessage({ type: 'RESET_EDITOR' }, '*');
+        if (window.__dsaTutorResetEditor) {
+          try { window.__dsaTutorResetEditor(); } catch (e) {}
+        }
+      },
       refreshData: () => {
         fetchMastery();
         fetchRecommendation();

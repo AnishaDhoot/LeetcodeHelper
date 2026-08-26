@@ -158,6 +158,20 @@ const scrapeProblemIdentity = () => {
   return { problemId, problemTitle };
 };
 
+// Initialize window.dsaTutor scrapers and reset handlers
+window.dsaTutor = Object.assign(window.dsaTutor || {}, {
+  getCode: getCodeFromPage,
+  getLanguage: scrapeCurrentLanguage,
+  getConstraints: scrapeProblemConstraints,
+  getIdentity: scrapeProblemIdentity,
+  resetEditor: () => {
+    window.postMessage({ type: 'RESET_EDITOR' }, '*');
+    if (window.__dsaTutorResetEditor) {
+      try { window.__dsaTutorResetEditor(); } catch (e) {}
+    }
+  }
+});
+
 // ============================================================================
 // 4. Observe the LeetCode DOM for submission verdicts (auto-diagnosis)
 // ============================================================================

@@ -394,79 +394,181 @@ window.addEventListener("message", (event) => {
     applyAssessmentTabLocking(event.data.locked, event.data.reason);
   }
 
-  if (event.data && event.data.type === "RESET_EDITOR") {
+// Helper to get active language slug
+const getCurrentLanguageSlug = () => {
+  const langBtn = document.querySelector('button[id*="headlessui-listbox-button"], [data-cy="lang-select"], [class*="lang-select"], button:has([class*="text-xs"])');
+  const langText = (langBtn?.textContent || '').trim().toLowerCase();
+  
+  if (langText.includes('python3') || langText === 'python3') return 'python3';
+  if (langText.includes('python') || langText === 'python') return 'python3';
+  if (langText.includes('c++') || langText.includes('cpp')) return 'cpp';
+  if (langText.includes('java') && !langText.includes('script')) return 'java';
+  if (langText.includes('javascript') || langText.includes('js')) return 'javascript';
+  if (langText.includes('typescript') || langText.includes('ts')) return 'typescript';
+  if (langText.includes('c#') || langText.includes('csharp')) return 'csharp';
+  if (langText.includes('c') && langText.length <= 2) return 'c';
+  if (langText.includes('go') || langText.includes('golang')) return 'golang';
+  if (langText.includes('rust')) return 'rust';
+  if (langText.includes('swift')) return 'swift';
+  if (langText.includes('kotlin')) return 'kotlin';
+
+  if (window.monaco?.editor) {
+    const models = window.monaco.editor.getModels() || [];
+    for (const m of models) {
+      const modeId = m.getLanguageId ? m.getLanguageId() : m.getModeId ? m.getModeId() : '';
+      if (modeId) {
+        if (modeId === 'python') return 'python3';
+        return modeId;
+      }
+    }
+  }
+  return 'python3';
+};
+
+// Full multi-strategy reset function to restore clean default boilerplate
+const resetMonacoToStarterCode = async () => {
+  console.log("[DSA Tutor Injected] Executing full Monaco editor reset to default template...");
+  
+  const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
+  const slug = match ? match[1] : null;
+
+  // Strategy 1: Direct GraphQL Snippet Retrieval & Model Injection
+  if (slug) {
     try {
-      const executeReset = () => {
-        const allButtons = Array.from(document.querySelectorAll(
-          'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset"], [aria-label*="reset"], [title*="Reset"], [title*="reset"], [aria-label*="default code"], [title*="default code"], [aria-label*="Retrieve default"], [title*="Retrieve default"]'
-        ));
-
-        let resetBtn = allButtons.find(el => {
-          if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
-          const str = (
-            (el.getAttribute('title') || '') + ' ' +
-            (el.getAttribute('aria-label') || '') + ' ' +
-            (el.getAttribute('data-cypress') || '') + ' ' +
-            (el.getAttribute('data-cy') || '') + ' ' +
-            (el.getAttribute('data-track-name') || '') + ' ' +
-            (el.textContent || '') + ' ' +
-            (el.innerHTML || '')
-          ).toLowerCase();
-
-          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('rotate-ccw');
-        });
-
-        // Also search inside editor header toolbars specifically
-        if (!resetBtn) {
-          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"]');
-          for (const bar of editorToolbars) {
-            const btns = bar.querySelectorAll('button, svg, [role="button"]');
-            for (const b of btns) {
-              const html = (b.outerHTML || '').toLowerCase();
-              if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default')) {
-                resetBtn = b.closest('button, [role="button"]') || b;
-                break;
+      const activeLang = getCurrentLanguageSlug();
+      const res = await fetch("https://leetcode.com/graphql/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `query questionData($titleSlug: String!) {
+            question(titleSlug: $titleSlug) {
+              codeSnippets {
+                lang
+                langSlug
+                code
               }
             }
-            if (resetBtn) break;
+          }`,
+          variables: { titleSlug: slug }
+        })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const snippets = json?.data?.question?.codeSnippets || [];
+        if (snippets.length > 0) {
+          const matchSnippet = snippets.find(s => 
+            s.langSlug === activeLang || 
+            s.lang.toLowerCase() === activeLang ||
+            s.langSlug.includes(activeLang) ||
+            activeLang.includes(s.langSlug)
+          ) || snippets[0];
+
+          if (matchSnippet && matchSnippet.code) {
+            console.log(`[DSA Tutor Injected] Applying clean starter code for ${matchSnippet.langSlug}...`);
+            if (window.monaco?.editor) {
+              const models = window.monaco.editor.getModels() || [];
+              const validModels = models.filter(m => !m.uri.toString().includes("inmemory://testcase"));
+              const targetModel = validModels.length > 0 ? validModels[0] : models[0];
+              if (targetModel) {
+                targetModel.setValue(matchSnippet.code);
+              }
+            }
           }
         }
-
-        if (resetBtn) {
-          resetBtn.click();
-          // Confirm the reset modal with multiple attempts
-          [100, 250, 450, 700, 1100].forEach(delay => {
-            setTimeout(() => {
-              const confirmBtns = Array.from(document.querySelectorAll(
-                'button, div[role="button"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button'
-              ));
-              const confirmBtn = confirmBtns.find(b => {
-                if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
-                const txt = (b.textContent || '').trim().toLowerCase();
-                const cls = (b.className || '').toLowerCase();
-                return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm');
-              });
-              if (confirmBtn) confirmBtn.click();
-            }, delay);
-          });
-        }
-      };
-
-      // Run immediate and staggered attempts to catch DOM readiness
-      executeReset();
-      setTimeout(executeReset, 350);
-      setTimeout(executeReset, 800);
-      setTimeout(executeReset, 1500);
-
-      // Re-apply readOnly state if locked
-      if (window.__dsaTutorReadOnly) {
-        setTimeout(() => {
-          applyReadOnlyState(true);
-        }, 400);
       }
-    } catch (e) {
-      console.error("[DSA Tutor Injected] Error resetting editor:", e);
+    } catch (err) {
+      console.warn("[DSA Tutor Injected] GraphQL snippet fetch error:", err);
     }
+  }
+
+  // Strategy 2: Click Native Reset to Default Code Button & Auto-Confirm Dialog
+  const triggerNativeResetClick = () => {
+    const allButtons = Array.from(document.querySelectorAll(
+      'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset" i], [title*="Reset" i], [aria-label*="default" i], [title*="default" i], [aria-label*="Restore" i], [title*="Restore" i]'
+    ));
+
+    let resetBtn = allButtons.find(el => {
+      if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+      const str = (
+        (el.getAttribute('title') || '') + ' ' +
+        (el.getAttribute('aria-label') || '') + ' ' +
+        (el.getAttribute('data-cypress') || '') + ' ' +
+        (el.getAttribute('data-cy') || '') + ' ' +
+        (el.getAttribute('data-track-name') || '') + ' ' +
+        (el.textContent || '') + ' ' +
+        (el.innerHTML || '')
+      ).toLowerCase();
+
+      return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('rotate-ccw');
+    });
+
+    if (!resetBtn) {
+      const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"]');
+      for (const bar of editorToolbars) {
+        const btns = bar.querySelectorAll('button, svg, [role="button"]');
+        for (const b of btns) {
+          const html = (b.outerHTML || '').toLowerCase();
+          if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default')) {
+            resetBtn = b.closest('button, [role="button"]') || b;
+            break;
+          }
+        }
+        if (resetBtn) break;
+      }
+    }
+
+    if (resetBtn) {
+      resetBtn.click();
+      [60, 150, 300, 550, 900, 1400].forEach(delay => {
+        setTimeout(() => {
+          const confirmBtns = Array.from(document.querySelectorAll(
+            'button, div[role="button"], [data-cypress="Confirm"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, div[role="dialog"] button'
+          ));
+          const confirmBtn = confirmBtns.find(b => {
+            if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+            const txt = (b.textContent || '').trim().toLowerCase();
+            const cls = (b.className || '').toLowerCase();
+            return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm');
+          });
+          if (confirmBtn) confirmBtn.click();
+        }, delay);
+      });
+    }
+  };
+
+  triggerNativeResetClick();
+  setTimeout(triggerNativeResetClick, 300);
+  setTimeout(triggerNativeResetClick, 800);
+
+  // Strategy 3: Clean up localStorage keys for the problem
+  try {
+    if (slug) {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.includes(slug) || key.includes("code_editor") || key.includes("autosave"))) {
+          // Do not delete global configs, only problem code cache
+          if (key.includes(slug)) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  if (window.__dsaTutorReadOnly) {
+    setTimeout(() => {
+      applyReadOnlyState(true);
+    }, 400);
+  }
+};
+
+window.__dsaTutorResetEditor = resetMonacoToStarterCode;
+
+let lastResetAssessmentSlug = "";
+
+  if (event.data && event.data.type === "RESET_EDITOR") {
+    resetMonacoToStarterCode();
   }
 });
 
@@ -477,9 +579,18 @@ setInterval(() => {
   }
 }, 400);
 
-// Continuously enforce assessment locking while assessment is active
+// Continuously enforce assessment locking while assessment is active and auto-reset when entering new problem
 setInterval(() => {
   if (window.__dsaTutorAssessmentLocked) {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
+
+    const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
+    const curSlug = match ? match[1] : "";
+    if (curSlug && curSlug !== lastResetAssessmentSlug) {
+      lastResetAssessmentSlug = curSlug;
+      resetMonacoToStarterCode();
+    }
+  } else {
+    lastResetAssessmentSlug = "";
   }
-}, 300);
+}, 400);
