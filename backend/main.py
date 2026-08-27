@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 AI_DAILY_QUOTA_LIMIT = int(os.getenv("AI_DAILY_QUOTA_LIMIT", "50"))
 
@@ -363,18 +363,14 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
     Analyzes a failed submission or registers a successful one.
     Triggers LLM diagnosis for failures and updates mastery tracking.
     """
-    clean_problem_id = req.problem_id.strip().split('?')[0].split('#')[0].rstrip('/')
-
     # 1. Fetch or dynamically create the problem in the DB
-    problem = db.query(Problem).filter(Problem.id == clean_problem_id).first()
-    if not problem:
-        problem = db.query(Problem).filter(Problem.id == req.problem_id).first()
+    problem = db.query(Problem).filter(Problem.id == req.problem_id).first()
     if not problem:
         # Dynamically register the problem if not seeded
         problem = Problem(
-            id=clean_problem_id,
+            id=req.problem_id,
             title=req.problem_title,
-            url=f"https://leetcode.com/problems/{clean_problem_id}/",
+            url=f"https://leetcode.com/problems/{req.problem_id}/",
             difficulty="Medium", # Default
             topics="Arrays & Hashing" # Fallback topic
         )
@@ -384,47 +380,61 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
 
     is_success = (req.verdict.lower() in ["accepted", "success"])
 
-    # If successful, set is_solved in problem
+    # If successful, set is_solved and solved_live in problem
     if is_success:
         problem.is_solved = True
+        problem.solved_live = True
 
     badge_award_payload = None
     # Check badge test progress before modifying TopicMastery rating
     active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
-    if active_test and is_success:
-        p1_clean = active_test.problem1_id.strip().split('?')[0].split('#')[0].rstrip('/')
-        p2_clean = active_test.problem2_id.strip().split('?')[0].split('#')[0].rstrip('/')
+    
+    def normalize_problem_slug(s: Optional[str]) -> str:
+        if not s:
+            return ""
+        s = s.rstrip("/").split("/")[-1]
+        return s.strip().lower().replace("_", "-").replace(" ", "-")
+
+    p_id_norm = normalize_problem_slug(problem.id)
+    p_req_norm = normalize_problem_slug(req.problem_id)
+    p1_id_norm = normalize_problem_slug(active_test.problem1_id) if active_test else ""
+    p2_id_norm = normalize_problem_slug(active_test.problem2_id) if active_test else ""
+
+    is_p1_match = (p_id_norm == p1_id_norm or p_req_norm == p1_id_norm or (problem.title and active_test and problem.title.lower() == (db.query(Problem).filter(Problem.id == active_test.problem1_id).first().title.lower() if db.query(Problem).filter(Problem.id == active_test.problem1_id).first() else "")))
+    is_p2_match = (p_id_norm == p2_id_norm or p_req_norm == p2_id_norm or (problem.title and active_test and problem.title.lower() == (db.query(Problem).filter(Problem.id == active_test.problem2_id).first().title.lower() if db.query(Problem).filter(Problem.id == active_test.problem2_id).first() else "")))
+
+    if active_test and (is_p1_match or is_p2_match) and is_success:
         updated = False
-        if clean_problem_id == p1_clean and not active_test.problem1_solved:
+        if is_p1_match and not active_test.problem1_solved:
             active_test.problem1_solved = True
             updated = True
-        elif clean_problem_id == p2_clean and not active_test.problem2_solved:
+        elif is_p2_match and not active_test.problem2_solved:
             active_test.problem2_solved = True
             updated = True
 
-        if updated and active_test.problem1_solved and active_test.problem2_solved:
-            active_test.status = "passed"
-            active_test.end_time = get_utc_now()
-            # Award badge!
-            canonical_topic = normalize_topic(active_test.topic)
-            mastery = db.query(TopicMastery).filter(TopicMastery.topic == canonical_topic).first()
-            if mastery:
-                mastery.level = active_test.level
-                mastery.rating = max(mastery.rating, 800.0 + active_test.level * 240.0)
-                b_name = mastery.badge
-                r_val = mastery.rating
-            else:
-                badge_map = {1: "Bronze", 2: "Silver", 3: "Gold", 4: "Platinum", 5: "Diamond"}
-                b_name = badge_map.get(active_test.level, "Bronze")
-                r_val = 800.0 + active_test.level * 240.0
-            badge_award_payload = {
-                "topic": active_test.topic,
-                "level": active_test.level,
-                "badge": b_name,
-                "rating": r_val,
-                "message": f"Badge Test passed! Congratulations, you earned the {b_name} Badge for {active_test.topic}."
-            }
-            db.flush()
+        if updated:
+            if active_test.problem1_solved and active_test.problem2_solved:
+                active_test.status = "passed"
+                active_test.end_time = get_utc_now()
+                # Award badge!
+                mastery = db.query(TopicMastery).filter(TopicMastery.topic == active_test.topic).first()
+                if mastery:
+                    mastery.level = active_test.level
+                    mastery.rating = max(mastery.rating, 800.0 + active_test.level * 240.0)
+                    b_name = mastery.badge
+                    r_val = mastery.rating
+                else:
+                    badge_map = {1: "Bronze", 2: "Silver", 3: "Gold", 4: "Platinum", 5: "Diamond"}
+                    b_name = badge_map.get(active_test.level, "Bronze")
+                    r_val = 800.0 + active_test.level * 240.0
+                badge_award_payload = {
+                    "topic": active_test.topic,
+                    "level": active_test.level,
+                    "badge": b_name,
+                    "rating": r_val,
+                    "message": f"Badge Test passed! Congratulations, you earned the {b_name} Badge for {active_test.topic}."
+                }
+            db.commit()
 
     # 2. Update topic mastery & daily streak activity for each individual topic
     topic_list = [t.strip() for t in (problem.topics or "Arrays & Hashing").split(",") if t.strip()]
@@ -676,7 +686,6 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
         time_limit = getattr(active, 'time_limit_seconds', 5400) or 5400
         if elapsed > time_limit:
             active.status = "failed"
-            active.end_time = get_utc_now()
             db.commit()
         else:
             raise HTTPException(status_code=400, detail="A Badge Test is already active.")
@@ -800,13 +809,41 @@ def get_active_badge_test(db: Session = Depends(get_db)):
     p1 = db.query(Problem).filter(Problem.id == test.problem1_id).first()
     p2 = db.query(Problem).filter(Problem.id == test.problem2_id).first()
 
+    # Sync solved status only from Accepted attempts made during this active test session
+    grace_start = (test.start_time - timedelta(seconds=120)) if test.start_time else now
+    p1_accepted = db.query(Attempt).filter(
+        (Attempt.problem_id.ilike(test.problem1_id) | Attempt.problem_id.ilike(f"%{test.problem1_id}%")),
+        Attempt.verdict.in_(["Accepted", "accepted", "success", "Success"]),
+        Attempt.timestamp >= grace_start
+    ).first()
+    p2_accepted = db.query(Attempt).filter(
+        (Attempt.problem_id.ilike(test.problem2_id) | Attempt.problem_id.ilike(f"%{test.problem2_id}%")),
+        Attempt.verdict.in_(["Accepted", "accepted", "success", "Success"]),
+        Attempt.timestamp >= grace_start
+    ).first()
+
+    p1_solved_now = bool(test.problem1_solved or p1_accepted)
+    p2_solved_now = bool(test.problem2_solved or p2_accepted)
+
+    if test.problem1_solved != p1_solved_now or test.problem2_solved != p2_solved_now:
+        test.problem1_solved = p1_solved_now
+        test.problem2_solved = p2_solved_now
+        if test.problem1_solved and test.problem2_solved:
+            test.status = "passed"
+            test.end_time = now
+            mastery = db.query(TopicMastery).filter(TopicMastery.topic == test.topic).first()
+            if mastery:
+                mastery.level = test.level
+                mastery.rating = max(mastery.rating, 800.0 + test.level * 240.0)
+        db.commit()
+
     return BadgeTestSchema(
         id=test.id,
         topic=test.topic,
         level=test.level,
         status=test.status,
-        problem1=BadgeTestProblemSchema(id=p1.id, title=p1.title, url=p1.url, difficulty=p1.difficulty),
-        problem2=BadgeTestProblemSchema(id=p2.id, title=p2.title, url=p2.url, difficulty=p2.difficulty),
+        problem1=BadgeTestProblemSchema(id=p1.id, title=p1.title, url=p1.url, difficulty=p1.difficulty) if p1 else None,
+        problem2=BadgeTestProblemSchema(id=p2.id, title=p2.title, url=p2.url, difficulty=p2.difficulty) if p2 else None,
         problem1_solved=test.problem1_solved,
         problem2_solved=test.problem2_solved,
         time_limit_seconds=time_limit,
@@ -818,11 +855,12 @@ def get_active_badge_test(db: Session = Depends(get_db)):
 
 @app.post("/badge-test/abandon")
 def abandon_badge_test(db: Session = Depends(get_db)):
-    test = db.query(BadgeTest).filter(BadgeTest.status.in_(["active", "passed"])).first()
-    if not test:
+    tests = db.query(BadgeTest).filter(BadgeTest.status == "active").all()
+    if not tests:
         raise HTTPException(status_code=404, detail="No active Badge Test found.")
-    test.status = "abandoned"
-    test.end_time = get_utc_now()
+    for test in tests:
+        test.status = "abandoned"
+        test.end_time = get_utc_now()
     db.commit()
     return {"status": "success", "message": "Test abandoned."}
 
@@ -914,8 +952,7 @@ def submit_badge_test(db: Session = Depends(get_db)):
     test.end_time = get_utc_now()
     if test.problem1_solved and test.problem2_solved:
         test.status = "passed"
-        canonical_topic = normalize_topic(test.topic)
-        mastery = db.query(TopicMastery).filter(TopicMastery.topic == canonical_topic).first()
+        mastery = db.query(TopicMastery).filter(TopicMastery.topic == test.topic).first()
         if mastery:
             mastery.level = test.level
             mastery.rating = max(mastery.rating, 800.0 + test.level * 240.0)

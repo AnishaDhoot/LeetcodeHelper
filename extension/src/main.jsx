@@ -151,7 +151,7 @@ const scrapeConstraints = () => {
 
 // Extract current problem identity from URL + document title.
 const scrapeProblemIdentity = () => {
-  const urlMatch = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
+  const urlMatch = window.location.href.match(/problems\/([^/]+)/);
   const problemId = urlMatch ? urlMatch[1] : 'unknown-problem';
   const docTitle = document.title || '';
   const problemTitle = docTitle.split('-')[0].trim() || problemId;
@@ -296,6 +296,27 @@ const handleVerdictDetected = async (verdict, node) => {
 };
 
 let lastSubmitClickTimestamp = 0;
+let recentSubmitAt = 0;
+const SUBMIT_GRACE_MS = 15000; // covers slow judge queue times
+
+function markSubmitIntent() {
+  recentSubmitAt = Date.now();
+  lastSubmitClickTimestamp = Date.now();
+}
+
+function isWithinSubmitGrace() {
+  return Date.now() - recentSubmitAt < SUBMIT_GRACE_MS;
+}
+
+let lastRedirectAt = 0;
+const REDIRECT_COOLDOWN_MS = 2000;
+
+function safeRedirect(path) {
+  const now = Date.now();
+  if (now - lastRedirectAt < REDIRECT_COOLDOWN_MS) return;
+  lastRedirectAt = now;
+  window.location.replace(path);
+}
 
 // Mouse click detection for Submit button
 document.addEventListener('click', (e) => {
@@ -315,14 +336,14 @@ document.addEventListener('click', (e) => {
   );
 
   if (isSubmitBtn) {
-    lastSubmitClickTimestamp = Date.now();
+    markSubmitIntent();
   }
 }, true);
 
 // Keyboard shortcut detection (Ctrl+Enter / Cmd+Enter on LeetCode)
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    lastSubmitClickTimestamp = Date.now();
+    markSubmitIntent();
   }
 }, true);
 
@@ -338,16 +359,20 @@ window.addEventListener('popstate', checkUrlChange);
 window.addEventListener('hashchange', checkUrlChange);
 setInterval(checkUrlChange, 1000);
 
-const processedVerdictNodes = new WeakSet();
-const lastDetectedSubmissions = new Map();
-
-// Listen for network-intercepted submission verdicts from injected.js
+// Listen for native LeetCode API intercepted submission events
 window.addEventListener('message', (event) => {
-  if (event.source !== window || !event.data) return;
-  if (event.data.type === 'LEETCODE_SUBMISSION_VERDICT') {
-    const { verdict, problemId } = event.data;
-    console.log(`[DSA Tutor Content] Intercepted network submission verdict: ${verdict} for ${problemId}`);
-    handleVerdictDetected(verdict);
+  if (event.data && event.data.type === 'LEETCODE_SUBMISSION_RESULT') {
+    const verdict = event.data.verdict;
+    if (verdict) {
+      const { problemId } = scrapeProblemIdentity();
+      const subKey = `${problemId}_${verdict}`;
+      const now = Date.now();
+      const lastTime = lastDetectedSubmissions.get(subKey) || 0;
+      if (now - lastTime >= 2000) {
+        lastDetectedSubmissions.set(subKey, now);
+        handleVerdictDetected(verdict);
+      }
+    }
   }
 });
 
@@ -362,18 +387,27 @@ const checkNodeForVerdict = (node) => {
   for (const v of verdicts) {
     // Only match small text leaves (like status badges) to avoid match triggers on large parent divs.
     if (text === v || (text.includes(v) && text.length < 40)) {
-      // Ignore sample test runner tabs specifically
-      const isRunSamplePanel = !!node.closest(
-        '[data-e2e-locator="console-testcase-output"], [data-e2e-locator="runcode-result"], div[id*="testcase-tab"]'
+      const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
+      const isWithinGrace = (lastSubmitClickTimestamp > 0 && timeSinceSubmit <= 60000) || isWithinSubmitGrace();
+
+      // If strictly a sample testcase result, ignore
+      const isRunSampleOnly = !!node.closest(
+        '[data-e2e-locator="console-result"], [data-layout-path*="testcase"], [class*="run-code"], [class*="run-result"], [class*="testcase-result"]'
       );
-      if (isRunSamplePanel) {
+      if (isRunSampleOnly) {
         return;
       }
 
+      // For non-Accepted verdicts, require submit intent
+      if (v !== 'Accepted' && !isWithinGrace) {
+        return;
+      }
+
+      // Mark element as processed now that we know it's a valid submission verdict
       processedVerdictNodes.add(node);
       try { node.dataset.dsaProcessed = "true"; } catch (e) {}
 
-      // Reset submission timestamp immediately to prevent duplicate triggers
+      // Reset submission timestamp
       lastSubmitClickTimestamp = 0;
 
       const { problemId } = scrapeProblemIdentity();
@@ -387,7 +421,6 @@ const checkNodeForVerdict = (node) => {
       }
 
       lastDetectedSubmissions.set(subKey, now);
-      console.log(`[DSA Tutor Content] DOM submission verdict detected: ${v} for ${problemId}`);
       handleVerdictDetected(v, node);
       break;
     }
@@ -413,28 +446,6 @@ const observer = new MutationObserver((mutations) => {
     }
   }
 });
-
-// Attach observer to document.body and run backup polling
-const startVerdictObserver = () => {
-  const target = document.body || document.documentElement;
-  if (target) {
-    observer.observe(target, { childList: true, subtree: true, characterData: true });
-  }
-};
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startVerdictObserver);
-} else {
-  startVerdictObserver();
-}
-
-// Backup periodic scanner for active submission results in DOM
-setInterval(() => {
-  const candidates = document.querySelectorAll(
-    '[data-e2e-locator="submission-result"], [class*="submission-result"], [class*="status-accepted"], [class*="result_container"], div[data-layout-path*="submission"], div[data-layout-path*="result"], span[data-e2e-locator="submission-result"]'
-  );
-  candidates.forEach(el => checkNodeForVerdict(el));
-}, 1200);
 
 // Direct Content Script Fairplay Locking for Solutions, Editorial, Discussions, and Submissions
 const injectDirectLockCSS = (isLocked) => {
@@ -555,7 +566,8 @@ const applyDirectTabLocking = (locked, reason = 'Badge Test') => {
 
   if (locked) {
     const curHref = window.location.href;
-    const isForbiddenRoute = (
+    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
+    const isSubmissionListOrDetailRoute = (
       curHref.includes('/solution') ||
       curHref.includes('/solutions') ||
       curHref.includes('/editorial') ||
@@ -564,14 +576,18 @@ const applyDirectTabLocking = (locked, reason = 'Badge Test') => {
       curHref.includes('/discussions') ||
       curHref.includes('/comments') ||
       curHref.includes('/community') ||
-      curHref.includes('/submissions/detail') ||
-      /\/submissions\/\d+/.test(curHref)
+      curHref.includes('/submissions/detail')
+    );
+
+    const isForbiddenRoute = (
+      isSubmissionListOrDetailRoute ||
+      (isSubmissionResultRoute && !isWithinSubmitGrace())
     );
 
     if (isForbiddenRoute) {
       const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, '/description/');
       if (cleanUrl !== curHref) {
-        window.location.replace(cleanUrl);
+        safeRedirect(cleanUrl);
       }
     }
 
@@ -620,7 +636,8 @@ document.addEventListener('click', (e) => {
     applyDirectTabLocking(true, directAssessmentReason);
 
     const curHref = window.location.href;
-    const isForbiddenRoute = (
+    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
+    const isSubmissionListOrDetailRoute = (
       curHref.includes('/solution') ||
       curHref.includes('/solutions') ||
       curHref.includes('/editorial') ||
@@ -629,14 +646,18 @@ document.addEventListener('click', (e) => {
       curHref.includes('/discussions') ||
       curHref.includes('/comments') ||
       curHref.includes('/community') ||
-      curHref.includes('/submissions/detail') ||
-      /\/submissions\/\d+/.test(curHref)
+      curHref.includes('/submissions/detail')
+    );
+
+    const isForbiddenRoute = (
+      isSubmissionListOrDetailRoute ||
+      (isSubmissionResultRoute && !isWithinSubmitGrace())
     );
 
     if (isForbiddenRoute) {
       const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, '/description/');
       if (cleanUrl !== curHref) {
-        window.location.replace(cleanUrl);
+        safeRedirect(cleanUrl);
       }
     }
     return false;

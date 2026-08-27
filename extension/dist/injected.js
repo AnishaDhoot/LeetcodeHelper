@@ -1,34 +1,56 @@
-// Intercept LeetCode's submission check API to capture live verdicts 100% reliably
-(() => {
-  try {
-    const origFetch = window.fetch;
-    if (origFetch && !window.__dsaTutorFetchHooked) {
-      window.__dsaTutorFetchHooked = true;
-      window.fetch = async function(...args) {
-        const response = await origFetch.apply(this, args);
+// Intercept fetch and XMLHttpRequest for LeetCode submission check results
+(function() {
+  const origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = async function(...args) {
+      const response = await origFetch.apply(this, args);
+      try {
+        const url = (typeof args[0] === 'string' ? args[0] : args[0]?.url || '').toLowerCase();
+        if (url.includes('/submissions/') || url.includes('/check/') || url.includes('/graphql')) {
+          const clone = response.clone();
+          clone.json().then(data => {
+            if (!data) return;
+            const statusMsg = data.status_msg || data.data?.submissionDetail?.statusDisplay || data.data?.submissionStatus?.statusDisplay;
+            if (statusMsg) {
+              window.postMessage({
+                type: 'LEETCODE_SUBMISSION_RESULT',
+                verdict: statusMsg === 'Accepted' ? 'Accepted' : statusMsg
+              }, '*');
+            }
+          }).catch(() => {});
+        }
+      } catch (e) {}
+      return response;
+    };
+  }
+
+  const origXHR = window.XMLHttpRequest;
+  if (origXHR && origXHR.prototype) {
+    const origOpen = origXHR.prototype.open;
+    const origSend = origXHR.prototype.send;
+    origXHR.prototype.open = function(method, url) {
+      this._url = url;
+      return origOpen.apply(this, arguments);
+    };
+    origXHR.prototype.send = function() {
+      this.addEventListener('load', function() {
         try {
-          const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-          if (url.includes('/submissions/detail/') && url.includes('/check/')) {
-            const clone = response.clone();
-            clone.json().then(data => {
-              if (data && data.state === 'SUCCESS' && data.status_msg) {
-                const slugMatch = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
-                const problemSlug = slugMatch ? slugMatch[1] : '';
-                window.postMessage({
-                  type: 'LEETCODE_SUBMISSION_VERDICT',
-                  verdict: data.status_msg,
-                  problemId: problemSlug,
-                  totalCorrect: data.total_correct,
-                  totalTestcases: data.total_testcases
-                }, '*');
-              }
-            }).catch(() => {});
+          const url = (this._url || '').toLowerCase();
+          if (url.includes('/submissions/') || url.includes('/check/') || url.includes('/graphql')) {
+            const data = JSON.parse(this.responseText);
+            const statusMsg = data?.status_msg || data?.data?.submissionDetail?.statusDisplay || data?.data?.submissionStatus?.statusDisplay;
+            if (statusMsg) {
+              window.postMessage({
+                type: 'LEETCODE_SUBMISSION_RESULT',
+                verdict: statusMsg === 'Accepted' ? 'Accepted' : statusMsg
+              }, '*');
+            }
           }
         } catch (e) {}
-        return response;
-      };
-    }
-  } catch (e) {}
+      });
+      return origSend.apply(this, arguments);
+    };
+  }
 })();
 
 // Function to apply/enforce readOnly state on Monaco + DOM overlay
@@ -127,6 +149,52 @@ const pollInterval = setInterval(() => {
 window.__dsaTutorAssessmentLocked = false;
 window.__dsaTutorLockReason = "";
 
+let recentSubmitAt = 0;
+const SUBMIT_GRACE_MS = 15000; // covers slow judge queue times
+
+function markSubmitIntent() {
+  recentSubmitAt = Date.now();
+}
+
+function isWithinSubmitGrace() {
+  return Date.now() - recentSubmitAt < SUBMIT_GRACE_MS;
+}
+
+let lastRedirectAt = 0;
+const REDIRECT_COOLDOWN_MS = 2000;
+
+function safeRedirect(path) {
+  const now = Date.now();
+  if (now - lastRedirectAt < REDIRECT_COOLDOWN_MS) return; // already handled recently
+  lastRedirectAt = now;
+  window.location.replace(path);
+}
+
+// Track submit clicks in page context
+document.addEventListener("click", (e) => {
+  const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"], [data-cypress="submit-code-btn"]') : null;
+  if (!btn) return;
+  const txt = (btn.textContent || '').trim().toLowerCase();
+  const locator = (btn.getAttribute('data-e2e-locator') || '').toLowerCase();
+  const testId = (btn.getAttribute('data-testid') || '').toLowerCase();
+  const isSubmitBtn = (
+    locator.includes('submit') ||
+    testId.includes('submit') ||
+    txt === 'submit' ||
+    txt === 'submit code' ||
+    (txt.includes('submit') && !txt.includes('run'))
+  );
+  if (isSubmitBtn) {
+    markSubmitIntent();
+  }
+}, true);
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    markSubmitIntent();
+  }
+}, true);
+
 const injectLockCSS = (isLocked) => {
   let styleEl = document.getElementById("dsa-tutor-fairplay-css");
   if (isLocked) {
@@ -134,14 +202,15 @@ const injectLockCSS = (isLocked) => {
       styleEl = document.createElement("style");
       styleEl.id = "dsa-tutor-fairplay-css";
       styleEl.textContent = `
-        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions/detail"],
+        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"],
         div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submission"], div[data-layout-path*="submissions"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submissions"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submission"], [data-track-load*="submissions"],
         [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
+        [id*="submission-tab"], [id*="submissions-tab"], [data-tab*="submission"], [data-tab*="submissions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
         div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"], div[class*="submission-detail"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"] {
+        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"] {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -198,20 +267,21 @@ const isForbiddenElement = (el) => {
     if (
       href.includes("/editorial") || href.includes("/solution") || href.includes("/solutions") ||
       href.includes("/discussion") || href.includes("/discussions") || href.includes("/community") ||
-      href.includes("/comments") || href.includes("/submissions/detail") || /\/submissions\/\d+/.test(href) ||
+      href.includes("/comments") || href.includes("/submissions") ||
       dataPath.includes("editorial") || dataPath.includes("solution") || dataPath.includes("discussion") ||
       dataPath.includes("community") || dataPath.includes("submission") ||
       dataKey.includes("editorial") || dataKey.includes("solution") || dataKey.includes("discussion") ||
       dataKey.includes("community") || dataKey.includes("submission") ||
       dataTrack.includes("editorial") || dataTrack.includes("solution") || dataTrack.includes("discussion") ||
-      dataTrack.includes("submissions") ||
+      dataTrack.includes("submission") || dataTrack.includes("submissions") ||
       (ariaLabel.includes("solution") && !ariaLabel.includes("submit")) ||
-      ariaLabel.includes("editorial") || ariaLabel.includes("discussion") ||
+      ariaLabel.includes("editorial") || ariaLabel.includes("discussion") || ariaLabel.includes("submission") ||
       ariaLabel.includes("community") || ariaLabel.includes("comment") ||
       (title.includes("solution") && !title.includes("submit")) ||
-      title.includes("editorial") || title.includes("discussion") ||
-      idStr.includes("editorial") || idStr.includes("discussion") ||
-      cls.includes("editorial") || cls.includes("solution") || cls.includes("discussion") || cls.includes("submissions-list") || cls.includes("submission-list")
+      title.includes("editorial") || title.includes("discussion") || title.includes("submission") ||
+      idStr.includes("editorial") || idStr.includes("discussion") || idStr.includes("submission") ||
+      cls.includes("editorial") || cls.includes("solution") || cls.includes("discussion") ||
+      cls.includes("submissions-list") || cls.includes("submission-list") || cls.includes("past-submissions")
     ) {
       return true;
     }
@@ -224,8 +294,8 @@ const isForbiddenElement = (el) => {
         text === "editorial" || text.startsWith("editorial") ||
         text === "solutions" || text === "solution" || text.startsWith("solutions") ||
         text === "discussion" || text === "discussions" || text.startsWith("discussion") ||
-        text === "submissions" || text === "past submissions" || text === "submission history" ||
-        text === "community" || text === "comments"
+        text === "submissions" || text.startsWith("submissions") || text.includes("past submission") ||
+        text === "submission history" || text === "community" || text === "comments"
       ) {
         return true;
       }
@@ -245,18 +315,30 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
   injectLockCSS(isLocked);
 
   try {
-    const isForbiddenRoute = (
-      window.location.href.includes("/solution") ||
-      window.location.href.includes("/solutions") ||
-      window.location.href.includes("/editorial") ||
-      window.location.href.includes("/editorials") ||
-      window.location.href.includes("/discussion") ||
-      window.location.href.includes("/discussions") ||
-      window.location.href.includes("/comments") ||
-      window.location.href.includes("/community") ||
-      window.location.href.includes("/submissions/detail") ||
-      /\/submissions\/\d+/.test(window.location.href)
+    const curHref = window.location.href;
+    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
+    const isSubmissionListOrDetailRoute = (
+      curHref.includes("/editorial") ||
+      curHref.includes("/solutions") ||
+      curHref.includes("/submissions/detail") ||
+      curHref.includes("/discussion") ||
+      curHref.includes("/discussions") ||
+      curHref.includes("/comments") ||
+      curHref.includes("/community")
     );
+
+    const isForbiddenRoute = (
+      isSubmissionListOrDetailRoute ||
+      (isSubmissionResultRoute && !isWithinSubmitGrace())
+    );
+
+    // If currently on a forbidden route, immediately redirect back to /description/
+    if (isLocked && isForbiddenRoute) {
+      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, "/description/");
+      if (cleanUrl !== curHref) {
+        safeRedirect(cleanUrl);
+      }
+    }
 
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
 
@@ -360,10 +442,26 @@ document.addEventListener("click", (e) => {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
 
     const curHref = window.location.href;
-    if (curHref.includes("/editorial") || curHref.includes("/solution") || curHref.includes("/discussion") || curHref.includes("/submissions")) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions?)[^/]*\/?/gi, "/description/");
+    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
+    const isSubmissionListOrDetailRoute = (
+      curHref.includes("/editorial") ||
+      curHref.includes("/solutions") ||
+      curHref.includes("/submissions/detail") ||
+      curHref.includes("/discussion") ||
+      curHref.includes("/discussions") ||
+      curHref.includes("/comments") ||
+      curHref.includes("/community")
+    );
+
+    const isForbiddenRoute = (
+      isSubmissionListOrDetailRoute ||
+      (isSubmissionResultRoute && !isWithinSubmitGrace())
+    );
+
+    if (isForbiddenRoute) {
+      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, "/description/");
       if (cleanUrl !== curHref) {
-        window.location.replace(cleanUrl);
+        safeRedirect(cleanUrl);
       }
     }
     return false;
@@ -419,70 +517,25 @@ window.addEventListener("message", (event) => {
     applyAssessmentTabLocking(event.data.locked, event.data.reason);
   }
 
-// Helper to extract active programming language
-const getActiveLanguageFromPage = () => {
-  const langBtn = document.querySelector('button[id*="headlessui-listbox-button"], [data-cy="lang-select"], [class*="lang-select"], button:has([class*="text-xs"])');
-  const txt = (langBtn?.textContent || '').trim().toLowerCase();
-  if (txt.includes('python3') || txt === 'python3') return 'python3';
-  if (txt.includes('python')) return 'python3';
-  if (txt.includes('c++') || txt.includes('cpp')) return 'cpp';
-  if (txt.includes('java') && !txt.includes('script')) return 'java';
-  if (txt.includes('javascript') || txt.includes('js')) return 'javascript';
-  if (txt.includes('typescript') || txt.includes('ts')) return 'typescript';
-  if (txt.includes('c#') || txt.includes('csharp')) return 'csharp';
-  if (txt.includes('c') && txt.length <= 2) return 'c';
-  if (txt.includes('go') || txt.includes('golang')) return 'golang';
-  if (txt.includes('rust')) return 'rust';
-  
-  if (window.monaco?.editor) {
-    const models = window.monaco.editor.getModels() || [];
-    for (const m of models) {
-      const modeId = m.getLanguageId ? m.getLanguageId() : m.getModeId ? m.getModeId() : '';
-      if (modeId) {
-        if (modeId === 'python') return 'python3';
-        return modeId;
-      }
-    }
-  }
-  return 'python3';
-};
-
-// Helper to extract starter code from page embedded __NEXT_DATA__ with 0 network calls
-const getStarterSnippetFromPage = () => {
-  try {
-    const nextScript = document.getElementById('__NEXT_DATA__');
-    if (!nextScript) return null;
-    const data = JSON.parse(nextScript.textContent || '{}');
-    const queries = data?.props?.pageProps?.dehydratedState?.queries || [];
-    for (const q of queries) {
-      const snippets = q?.state?.data?.question?.codeSnippets || q?.state?.data?.questionData?.codeSnippets;
-      if (snippets && Array.isArray(snippets) && snippets.length > 0) {
-        const lang = getActiveLanguageFromPage();
-        const found = snippets.find(s => s.langSlug === lang || s.lang?.toLowerCase() === lang || lang.includes(s.langSlug));
-        return found ? found.code : snippets[0].code;
-      }
-    }
-  } catch (e) {}
-  return null;
-};
-
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
-      // 1. Direct Monaco model injection from embedded page data (instant, 0 network requests)
-      const starterCode = getStarterSnippetFromPage();
-      if (starterCode && window.monaco?.editor) {
-        const models = window.monaco.editor.getModels() || [];
-        const validModels = models.filter(m => !m.uri.toString().includes("testcase") && !m.uri.toString().includes("input"));
-        const target = validModels.length > 0 ? validModels[0] : models[0];
-        if (target) {
-          target.setValue(starterCode);
-        }
-      }
+      let resetAttempts = 0;
+      let resetDone = false;
 
-      // 2. Click native LeetCode reset button & confirm dialog
-      const executeReset = () => {
+      const triggerClick = (el) => {
+        if (!el) return;
+        ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(evtType => {
+          try {
+            const evt = new MouseEvent(evtType, { bubbles: true, cancelable: true, view: window });
+            el.dispatchEvent(evt);
+          } catch (e) {}
+        });
+        try { el.click(); } catch (e) {}
+      };
+
+      const findResetButton = () => {
         const allButtons = Array.from(document.querySelectorAll(
-          'button, [role="button"], [data-cypress="ResetCode"], [data-cy="reset-code-btn"], [data-track-name="reset_code"], [aria-label*="Reset" i], [aria-label*="reset" i], [title*="Reset" i], [title*="reset" i], [aria-label*="default code" i], [title*="default code" i], [aria-label*="Retrieve default" i], [title*="Retrieve default" i], [title*="Restore" i], [aria-label*="Restore" i]'
+          'button, [role="button"], [data-cypress*="Reset" i], [data-cy*="reset" i], [data-e2e-locator*="reset" i], [data-track-name*="reset" i], [data-track-load*="reset" i], [aria-label*="Reset" i], [aria-label*="default code" i], [aria-label*="Retrieve" i], [title*="Reset" i], [title*="default code" i], [title*="Retrieve" i]'
         ));
 
         let resetBtn = allButtons.find(el => {
@@ -493,21 +546,23 @@ const getStarterSnippetFromPage = () => {
             (el.getAttribute('data-cypress') || '') + ' ' +
             (el.getAttribute('data-cy') || '') + ' ' +
             (el.getAttribute('data-track-name') || '') + ' ' +
+            (el.getAttribute('data-track-load') || '') + ' ' +
             (el.textContent || '') + ' ' +
             (el.innerHTML || '')
           ).toLowerCase();
 
-          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('rotate-ccw');
+          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('retrieve') || str.includes('rotate') || str.includes('undo');
         });
 
         // Also search inside editor header toolbars specifically
         if (!resetBtn) {
-          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"], [class*="toolbar"]');
+          const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"], [class*="toolbar"], [class*="editor-actions"]');
           for (const bar of editorToolbars) {
             const btns = bar.querySelectorAll('button, svg, [role="button"]');
             for (const b of btns) {
+              if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) continue;
               const html = (b.outerHTML || '').toLowerCase();
-              if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default')) {
+              if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default') || html.includes('refresh') || html.includes('arrow-rotate-left') || html.includes('rotate-left')) {
                 resetBtn = b.closest('button, [role="button"]') || b;
                 break;
               }
@@ -515,31 +570,49 @@ const getStarterSnippetFromPage = () => {
             if (resetBtn) break;
           }
         }
+        return resetBtn;
+      };
 
+      const tryConfirmModal = () => {
+        const confirmBtns = Array.from(document.querySelectorAll(
+          'button, div[role="button"], [data-cy*="confirm" i], [data-cypress*="confirm" i], [data-e2e-locator*="confirm" i], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, [class*="confirm"], [class*="danger"], [role="dialog"] button, button.ant-btn-primary'
+        ));
+        const confirmBtn = confirmBtns.find(b => {
+          if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
+          const txt = (b.textContent || '').trim().toLowerCase();
+          const cls = (b.className || '').toLowerCase();
+          const cy = ((b.getAttribute('data-cy') || '') + ' ' + (b.getAttribute('data-cypress') || '')).toLowerCase();
+          return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm') || cls.includes('danger') || cls.includes('brand-orange') || cy.includes('confirm');
+        });
+        if (confirmBtn) {
+          triggerClick(confirmBtn);
+          resetDone = true;
+          return true;
+        }
+        return false;
+      };
+
+      const executeReset = () => {
+        if (resetDone) return;
+        const resetBtn = findResetButton();
         if (resetBtn) {
-          resetBtn.click();
-          [80, 180, 320, 550, 900, 1400].forEach(delay => {
-            setTimeout(() => {
-              const confirmBtns = Array.from(document.querySelectorAll(
-                'button, div[role="button"], [data-cypress="Confirm"], [data-cy="confirm-btn"], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, div[role="dialog"] button'
-              ));
-              const confirmBtn = confirmBtns.find(b => {
-                if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
-                const txt = (b.textContent || '').trim().toLowerCase();
-                const cls = (b.className || '').toLowerCase();
-                return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm');
-              });
-              if (confirmBtn) confirmBtn.click();
-            }, delay);
+          triggerClick(resetBtn);
+          // Stagger modal confirmations
+          [40, 100, 200, 350, 600, 1000, 1500, 2500].forEach(delay => {
+            setTimeout(tryConfirmModal, delay);
           });
         }
       };
 
-      // Run immediate and staggered attempts to catch DOM readiness
+      // Immediate and repeated intervals to catch DOM hydration in SPAs
       executeReset();
-      setTimeout(executeReset, 250);
-      setTimeout(executeReset, 650);
-      setTimeout(executeReset, 1200);
+      const resetPollInterval = setInterval(() => {
+        resetAttempts++;
+        executeReset();
+        if (resetAttempts > 15 || resetDone) {
+          clearInterval(resetPollInterval);
+        }
+      }, 300);
 
       // Re-apply readOnly state if locked
       if (window.__dsaTutorReadOnly) {
@@ -565,4 +638,4 @@ setInterval(() => {
   if (window.__dsaTutorAssessmentLocked) {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
   }
-}, 300);
+}, 1000);

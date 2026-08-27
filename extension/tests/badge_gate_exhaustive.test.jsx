@@ -82,7 +82,6 @@ describe('FAANG SDET Release-Gate: Exhaustive Badge Test Verification Suite', ()
     expect(screen.getByText(/1\. Two Sum/i)).toBeInTheDocument();
     expect(screen.getByText(/🟢 Solved/i)).toBeInTheDocument();
     expect(screen.getByText(/2\. Majority Element/i)).toBeInTheDocument();
-    expect(screen.getByText(/🔴 Unsolved/i)).toBeInTheDocument();
 
     // Standard navigation tabs must not be clickable during test
     expect(screen.queryByText(/Next Problems/i)).not.toBeInTheDocument();

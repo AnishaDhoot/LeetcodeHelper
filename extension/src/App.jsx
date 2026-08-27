@@ -79,24 +79,36 @@ export default function App() {
       chrome.runtime.sendMessage({ action: 'start_badge_test', payload: { topic } }, (res) => {
         if (res && res.success && res.data) {
           setActiveTest(res.data);
-          const timeLimit = res.data.time_limit_seconds || 5400;
-          const elapsed = res.data.elapsed_seconds || 0;
-          setTestTimerSeconds(Math.max(0, timeLimit - elapsed));
+          setTestTimerSeconds(res.data.time_limit_seconds || 5400);
           setActiveTab('test');
           if (window.dsaTutor?.setAssessmentLocked) {
             window.dsaTutor.setAssessmentLocked(true, 'Badge Test');
           }
           if (window.dsaTutor?.resetEditor) {
             window.dsaTutor.resetEditor();
+            [200, 600, 1200, 2200].forEach(d => {
+              setTimeout(() => {
+                if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+              }, d);
+            });
           }
           if (res.data.problem1?.url) {
-            chrome.runtime.sendMessage({ action: 'navigate_tab', url: res.data.problem1.url }, (navRes) => {
-              if (!navRes || !navRes.success) window.location.href = res.data.problem1.url;
+            const urlMatch = window.location.href.match(/problems\/([^/]+)/);
+            const currentSlug = urlMatch ? urlMatch[1] : '';
+            if (currentSlug !== res.data.problem1.id) {
+              window.location.href = res.data.problem1.url;
+            }
+          }
+        } else if (res?.error && res.error.includes('Mock Interview is active')) {
+          if (window.confirm('A previous Mock Interview session is still open. Would you like to end the mock interview and start your Badge Test now?')) {
+            chrome.runtime.sendMessage({ action: 'mock_abandon' }, () => {
+              setIsMockMode(false);
+              setMockSession(null);
+              startBadgeTest(topic);
             });
           }
         } else {
-          fetchActiveTest();
-          setActiveTab('test');
+          alert(res?.error || 'Failed to start Badge Test.');
         }
       });
     };
@@ -115,21 +127,36 @@ export default function App() {
   };
 
   const [showBadgeSubmitConfirm, setShowBadgeSubmitConfirm] = useState(false);
-  const [showBadgeAbandonConfirm, setShowBadgeAbandonConfirm] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState(false);
+
+  const handleManualResetEditor = () => {
+    if (window.dsaTutor?.resetEditor) {
+      window.dsaTutor.resetEditor();
+      [150, 400, 900, 1800].forEach(d => {
+        setTimeout(() => {
+          if (window.dsaTutor?.resetEditor) window.dsaTutor.resetEditor();
+        }, d);
+      });
+    }
+    setResetFeedback(true);
+    setTimeout(() => setResetFeedback(false), 2200);
+  };
 
   const abandonBadgeTest = () => {
-    setShowBadgeAbandonConfirm(false);
-    chrome.runtime.sendMessage({ action: 'abandon_badge_test' }, (res) => {
-      setActiveTest(null);
-      setActiveTab('mastery');
+    if (window.confirm && !window.confirm('Are you sure you want to abandon this Badge Test? All progress for this test will be lost.')) return;
+    setActiveTest(null);
+    setActiveTab('mastery');
+    if (window.dsaTutor?.setAssessmentLocked) {
+      window.dsaTutor.setAssessmentLocked(false);
+    }
+    chrome.runtime.sendMessage({ action: 'abandon_badge_test' }, () => {
       fetchMastery();
-      window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked: false }, '*');
     });
   };
 
   const submitBadgeTest = () => {
-    setShowBadgeSubmitConfirm(false);
     chrome.runtime.sendMessage({ action: 'submit_badge_test' }, (res) => {
+      setShowBadgeSubmitConfirm(false);
       if (res && res.success) {
         if (res.data?.passed) {
           setBadgeAwardModal({
@@ -139,11 +166,14 @@ export default function App() {
             rating: res.data.rating,
             message: res.data.message
           });
+        } else {
+          alert(res.data?.message || 'Badge Test submitted. Both problems must be solved to earn the badge.');
         }
         setActiveTest(null);
         setActiveTab('mastery');
         fetchMastery();
-        window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked: false }, '*');
+      } else {
+        alert(res?.error || 'Failed to submit Badge Test.');
       }
     });
   };
@@ -861,6 +891,19 @@ export default function App() {
     return () => clearInterval(t);
   }, [isMockMode, mockSession]);
 
+  // Active Badge Test Live Poller to instantly reflect solved problems
+  useEffect(() => {
+    if (!activeTest) return;
+    const pollInterval = setInterval(() => {
+      chrome.runtime.sendMessage({ action: 'get_active_badge_test' }, (res) => {
+        if (res && res.success && res.data) {
+          setActiveTest(res.data);
+        }
+      });
+    }, 2000);
+    return () => clearInterval(pollInterval);
+  }, [activeTest?.id]);
+
   // Enforce editor locking and read-only protection during Mock Interview
   useEffect(() => {
     if (activeTest) {
@@ -921,7 +964,7 @@ export default function App() {
     };
 
     notifyLock();
-    const lockPulse = setInterval(notifyLock, 400);
+    const lockPulse = setInterval(notifyLock, 1000);
 
     return () => {
       clearInterval(lockPulse);
@@ -948,24 +991,6 @@ export default function App() {
     fetchActiveMock();
     fetchSyncedAccount();
     fetchSolvedProblems();
-    
-    // Poll URL slug and active test state periodically
-    const syncInterval = setInterval(() => {
-      if (typeof window !== 'undefined') {
-        const match = window.location.pathname.match(/\/problems\/([a-zA-Z0-9_-]+)/);
-        const slug = match ? match[1] : '';
-        setCurrentProblemId(slug);
-      }
-      chrome.runtime.sendMessage({ action: 'get_active_badge_test' }, (res) => {
-        if (res && res.success && res.data) {
-          setActiveTest(res.data);
-          const timeLimit = res.data.time_limit_seconds || 5400;
-          const elapsed = res.data.elapsed_seconds || 0;
-          const remaining = timeLimit - elapsed;
-          setTestTimerSeconds(remaining > 0 ? remaining : 0);
-        }
-      });
-    }, 2000);
 
     // Extend (do NOT overwrite) window.dsaTutor so the page-context scrapers from
     // main.jsx (getCode/getLanguage/getConstraints/getIdentity) are preserved.
@@ -1018,12 +1043,12 @@ export default function App() {
           setActiveTab('coach');
         }
       },
-      resetEditor: () => {
+      resetEditor: window.dsaTutor?.resetEditor || (() => {
         window.postMessage({ type: 'RESET_EDITOR' }, '*');
         if (window.__dsaTutorResetEditor) {
           try { window.__dsaTutorResetEditor(); } catch (e) {}
         }
-      },
+      }),
       refreshData: () => {
         fetchMastery();
         fetchRecommendation();
@@ -1263,158 +1288,212 @@ export default function App() {
       {/* Content Area */}
       <div className="tutor-content">
         {activeTest ? (
-          <div className="test-mode-container">
-            <div className="test-mode-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div className="test-mode-title">
-                  🏆 Badge Test: {activeTest.topic} Level {activeTest.level}
-                </div>
-                <p style={{ fontSize: '11px', color: '#a1a1aa', margin: '4px 0 0 0' }}>
-                  Solve both problems in LeetCode to unlock the <strong>{activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'}</strong> badge. Hints and Code Coach assistance are locked.
-                </p>
+          <div className="test-mode-container" style={{
+            background: '#111113',
+            border: '1px solid #1f1f23',
+            borderRadius: '8px',
+            padding: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px'
+          }}>
+            {/* Minimal Header */}
+            <div className="test-mode-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid #1a1a1e',
+              paddingBottom: '10px',
+              gap: '8px'
+            }}>
+              <div className="test-mode-title" style={{
+                fontSize: '12.5px',
+                fontWeight: '600',
+                color: '#f4f4f5',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                minWidth: 0,
+                flex: 1
+              }}>
+                <span style={{ flexShrink: 0 }}>🏆</span>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Badge Test: {activeTest.topic} Level {activeTest.level}
+                </span>
+                <span style={{ fontSize: '11px', color: '#a1a1aa', fontWeight: '500', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  ({activeTest.level === 1 ? 'Bronze' : activeTest.level === 2 ? 'Silver' : activeTest.level === 3 ? 'Gold' : activeTest.level === 4 ? 'Platinum' : 'Diamond'})
+                </span>
               </div>
-              <div style={{ background: '#27272a', padding: '4px 8px', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', color: '#fbbf24', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
-                ⏱ {Math.floor(testTimerSeconds / 3600)}h {String(Math.floor((testTimerSeconds % 3600) / 60)).padStart(2, '0')}m {String(testTimerSeconds % 60).padStart(2, '0')}s
+
+              <div style={{
+                fontSize: '11px',
+                fontFamily: 'monospace',
+                fontWeight: '600',
+                color: testTimerSeconds < 600 ? '#f87171' : '#a1a1aa',
+                background: '#18181b',
+                border: '1px solid #27272a',
+                padding: '3px 7px',
+                borderRadius: '5px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0
+              }}>
+                ⏱ {String(Math.floor(testTimerSeconds / 3600)).padStart(2, '0')}:
+                {String(Math.floor((testTimerSeconds % 3600) / 60)).padStart(2, '0')}:
+                {String(testTimerSeconds % 60).padStart(2, '0')}
               </div>
             </div>
-            
-            <div className="test-mode-problem-list">
+
+            {/* Problem List (Minimal clickable cards that turn green when solved) */}
+            <div className="test-mode-problem-list" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {/* Problem 1 */}
               <div
                 className={`test-problem-card ${activeTest.problem1_solved ? 'solved' : 'unsolved'}`}
                 style={{
+                  background: activeTest.problem1_solved ? 'rgba(34, 197, 94, 0.08)' : '#18181b',
+                  border: activeTest.problem1_solved
+                    ? '1px solid rgba(34, 197, 94, 0.4)'
+                    : currentProblemId === activeTest.problem1?.id
+                    ? '1px solid #3b82f6'
+                    : '1px solid #27272a',
+                  borderRadius: '6px',
+                  padding: '9px 12px',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  padding: '10px 12px',
-                  marginBottom: '8px',
                   cursor: 'pointer',
-                  border: currentProblemId === activeTest.problem1.id ? '1px solid #3b82f6' : undefined,
-                  background: currentProblemId === activeTest.problem1.id ? 'rgba(59, 130, 246, 0.08)' : undefined
+                  transition: 'all 0.15s ease'
                 }}
                 onClick={() => {
                   if (activeTest.problem1?.url && currentProblemId !== activeTest.problem1.id) {
                     chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem1.url }, (res) => {
                       if (!res || !res.success) window.location.href = activeTest.problem1.url;
                     });
+                    if (window.dsaTutor?.resetEditor) {
+                      window.dsaTutor.resetEditor();
+                      [200, 600, 1200, 2000].forEach(d => setTimeout(() => window.dsaTutor?.resetEditor?.(), d));
+                    }
                   }
                 }}
               >
-                <div style={{ flex: 1, marginRight: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: '700', color: activeTest.problem1_solved ? '#4ade80' : '#f4f4f5' }}>
-                      1. {activeTest.problem1.title}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                    Difficulty: <span style={{ color: activeTest.problem1.difficulty === 'Easy' ? '#4ade80' : activeTest.problem1.difficulty === 'Medium' ? '#fbbf24' : '#f87171', fontWeight: '600' }}>{activeTest.problem1.difficulty}</span>
-                  </div>
-                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {currentProblemId === activeTest.problem1.id ? (
-                    activeTest.problem1_solved ? (
-                      <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '4px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved (Active)</span>
-                    ) : (
-                      <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
-                    )
-                  ) : (
-                    <button
-                      className="coach-btn"
-                      style={{
-                        fontSize: '11px',
-                        padding: '4px 9px',
-                        background: activeTest.problem1_solved ? '#14532d44' : '#27272a',
-                        color: activeTest.problem1_solved ? '#4ade80' : '#fff',
-                        border: `1px solid ${activeTest.problem1_solved ? '#15803d66' : '#3f3f46'}`,
-                        fontWeight: activeTest.problem1_solved ? 'bold' : 'normal'
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (activeTest.problem1?.url) {
-                          chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem1.url }, (res) => {
-                            if (!res || !res.success) window.location.href = activeTest.problem1.url;
-                          });
-                        }
-                      }}
-                    >
-                      {activeTest.problem1_solved ? '🟢 Solved ➔' : 'Switch ➔'}
-                    </button>
-                  )}
+                  <span style={{
+                    fontSize: '12.5px',
+                    fontWeight: '500',
+                    color: activeTest.problem1_solved ? '#4ade80' : '#f4f4f5'
+                  }}>
+                    1. {activeTest.problem1?.title}
+                  </span>
+                  <span style={{
+                    fontSize: '10.5px',
+                    fontWeight: '500',
+                    color: activeTest.problem1?.difficulty === 'Easy' ? '#4ade80' : activeTest.problem1?.difficulty === 'Medium' ? '#fbbf24' : '#f87171'
+                  }}>
+                    {activeTest.problem1?.difficulty}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {activeTest.problem1_solved ? (
+                    <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: '600' }}>🟢 Solved</span>
+                  ) : currentProblemId === activeTest.problem1?.id ? (
+                    <span style={{ fontSize: '10px', color: '#60a5fa', fontWeight: '600', background: 'rgba(59, 130, 246, 0.12)', padding: '2px 6px', borderRadius: '4px' }}>Active</span>
+                  ) : null}
                 </div>
               </div>
 
+              {/* Problem 2 */}
               <div
                 className={`test-problem-card ${activeTest.problem2_solved ? 'solved' : 'unsolved'}`}
                 style={{
+                  background: activeTest.problem2_solved ? 'rgba(34, 197, 94, 0.08)' : '#18181b',
+                  border: activeTest.problem2_solved
+                    ? '1px solid rgba(34, 197, 94, 0.4)'
+                    : currentProblemId === activeTest.problem2?.id
+                    ? '1px solid #3b82f6'
+                    : '1px solid #27272a',
+                  borderRadius: '6px',
+                  padding: '9px 12px',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  padding: '10px 12px',
-                  marginBottom: '8px',
                   cursor: 'pointer',
-                  border: currentProblemId === activeTest.problem2.id ? '1px solid #3b82f6' : undefined,
-                  background: currentProblemId === activeTest.problem2.id ? 'rgba(59, 130, 246, 0.08)' : undefined
+                  transition: 'all 0.15s ease'
                 }}
                 onClick={() => {
                   if (activeTest.problem2?.url && currentProblemId !== activeTest.problem2.id) {
                     chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem2.url }, (res) => {
                       if (!res || !res.success) window.location.href = activeTest.problem2.url;
                     });
+                    if (window.dsaTutor?.resetEditor) {
+                      window.dsaTutor.resetEditor();
+                      [200, 600, 1200, 2000].forEach(d => setTimeout(() => window.dsaTutor?.resetEditor?.(), d));
+                    }
                   }
                 }}
               >
-                <div style={{ flex: 1, marginRight: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: '700', color: activeTest.problem2_solved ? '#4ade80' : '#f4f4f5' }}>
-                      2. {activeTest.problem2.title}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                    Difficulty: <span style={{ color: activeTest.problem2.difficulty === 'Easy' ? '#4ade80' : activeTest.problem2.difficulty === 'Medium' ? '#fbbf24' : '#f87171', fontWeight: '600' }}>{activeTest.problem2.difficulty}</span>
-                  </div>
-                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {currentProblemId === activeTest.problem2.id ? (
-                    activeTest.problem2_solved ? (
-                      <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 'bold', background: '#14532d44', padding: '4px 8px', borderRadius: '4px', border: '1px solid #15803d66' }}>🟢 Solved (Active)</span>
-                    ) : (
-                      <span style={{ fontSize: '11px', color: '#60a5fa', fontWeight: '700', background: 'rgba(59, 130, 246, 0.15)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.3)' }}>📍 Active</span>
-                    )
-                  ) : (
-                    <button
-                      className="coach-btn"
-                      style={{
-                        fontSize: '11px',
-                        padding: '4px 9px',
-                        background: activeTest.problem2_solved ? '#14532d44' : '#27272a',
-                        color: activeTest.problem2_solved ? '#4ade80' : '#fff',
-                        border: `1px solid ${activeTest.problem2_solved ? '#15803d66' : '#3f3f46'}`,
-                        fontWeight: activeTest.problem2_solved ? 'bold' : 'normal'
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (activeTest.problem2?.url) {
-                          chrome.runtime.sendMessage({ action: 'navigate_tab', url: activeTest.problem2.url }, (res) => {
-                            if (!res || !res.success) window.location.href = activeTest.problem2.url;
-                          });
-                        }
-                      }}
-                    >
-                      {activeTest.problem2_solved ? '🟢 Solved ➔' : 'Switch ➔'}
-                    </button>
-                  )}
+                  <span style={{
+                    fontSize: '12.5px',
+                    fontWeight: '500',
+                    color: activeTest.problem2_solved ? '#4ade80' : '#f4f4f5'
+                  }}>
+                    2. {activeTest.problem2?.title}
+                  </span>
+                  <span style={{
+                    fontSize: '10.5px',
+                    fontWeight: '500',
+                    color: activeTest.problem2?.difficulty === 'Easy' ? '#4ade80' : activeTest.problem2?.difficulty === 'Medium' ? '#fbbf24' : '#f87171'
+                  }}>
+                    {activeTest.problem2?.difficulty}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {activeTest.problem2_solved ? (
+                    <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: '600' }}>🟢 Solved</span>
+                  ) : currentProblemId === activeTest.problem2?.id ? (
+                    <span style={{ fontSize: '10px', color: '#60a5fa', fontWeight: '600', background: 'rgba(59, 130, 246, 0.12)', padding: '2px 6px', borderRadius: '4px' }}>Active</span>
+                  ) : null}
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+            {/* Action Buttons: Equal Length, Neutral Submit, Red Abandon */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '6px', paddingTop: '4px' }}>
               <button
-                className="coach-btn"
-                style={{ padding: '6px 14px', fontSize: '11px', background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
+                className="coach-btn secondary"
+                style={{
+                  flex: 1,
+                  padding: '7px 12px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  background: '#18181b',
+                  color: '#f4f4f5',
+                  border: '1px solid #3f3f46',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  textAlign: 'center'
+                }}
                 onClick={() => setShowBadgeSubmitConfirm(true)}
               >
                 Submit Test
               </button>
-              <button className="abandon-btn" onClick={() => setShowBadgeAbandonConfirm(true)}>
+              <button
+                className="abandon-btn"
+                style={{
+                  flex: 1,
+                  padding: '7px 12px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  color: '#f87171',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  textAlign: 'center'
+                }}
+                onClick={abandonBadgeTest}
+              >
                 Abandon Test
               </button>
             </div>
@@ -2621,50 +2700,53 @@ export default function App() {
         </div>
       )}
 
-      {/* Badge Awarded Celebration Modal */}
+      {/* Badge Awarded Result Modal (Minimalist Developer UI) */}
       {badgeAwardModal && (
-        <div className="celebration-backdrop" onClick={() => setBadgeAwardModal(null)}>
-          <div className="celebration-modal-card" onClick={e => e.stopPropagation()}>
-            <div className="celebration-confetti-container">
-              {Array.from({ length: 28 }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`confetti confetti-${i % 6}`}
-                  style={{
-                    left: `${(i * 3.6) + 1}%`,
-                    animationDelay: `${(i * 0.08).toFixed(2)}s`,
-                    animationDuration: `${1.6 + (i % 5) * 0.3}s`
-                  }}
-                />
-              ))}
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setBadgeAwardModal(null)}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '380px', padding: '20px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f1f23', paddingBottom: '12px', marginBottom: '16px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: '#f4f4f5', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🏆</span>
+                <span>Badge Test Passed</span>
+              </div>
+              <button onClick={() => setBadgeAwardModal(null)} style={{ background: 'transparent', border: 'none', color: '#71717a', cursor: 'pointer', fontSize: '16px' }}>✕</button>
             </div>
 
-            <div className="celebration-badge-glow">
-              <div className="celebration-badge-emoji">
+            {/* Badge Card */}
+            <div style={{ background: '#141417', border: '1px solid #27272a', borderRadius: '8px', padding: '16px', textAlign: 'center', marginBottom: '14px' }}>
+              <div style={{ fontSize: '36px', marginBottom: '8px', lineHeight: '1' }}>
                 {getBadgeEmoji(badgeAwardModal.badge)}
+              </div>
+              <div style={{ display: 'inline-block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '2px 8px', borderRadius: '4px', background: badgeAwardModal.badge === 'Bronze' ? 'rgba(217, 119, 6, 0.15)' : badgeAwardModal.badge === 'Silver' ? 'rgba(228, 228, 231, 0.15)' : 'rgba(234, 179, 8, 0.15)', color: badgeAwardModal.badge === 'Bronze' ? '#f59e0b' : badgeAwardModal.badge === 'Silver' ? '#e4e4e7' : '#fbbf24', border: '1px solid currentColor', marginBottom: '8px' }}>
+                Level {badgeAwardModal.level} • {badgeAwardModal.badge}
+              </div>
+              <div style={{ fontSize: '14px', fontWeight: '700', color: '#f4f4f5' }}>
+                {badgeAwardModal.topic}
+              </div>
+              <div style={{ fontSize: '11px', color: '#a1a1aa', marginTop: '4px', lineHeight: '1.4' }}>
+                You solved both test problems and earned the {badgeAwardModal.badge} badge!
               </div>
             </div>
 
-            <div className="celebration-badge-tier-tag">
-              LEVEL {badgeAwardModal.level} • {badgeAwardModal.badge?.toUpperCase()} BADGE
-            </div>
-
-            <h2 className="celebration-title">Badge Awarded! 🎉</h2>
-
-            <p className="celebration-desc">
-              Outstanding work! You successfully solved both test problems and unlocked the <strong>{badgeAwardModal.badge}</strong> badge for <strong>{badgeAwardModal.topic}</strong>!
-            </p>
-
+            {/* Stats Row */}
             {badgeAwardModal.rating && (
-              <div className="celebration-stat-box">
-                <div className="celebration-stat-label">TOPIC MASTERY ELO BOOST</div>
-                <div className="celebration-stat-val">📈 {Math.round(badgeAwardModal.rating)} Elo</div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <div style={{ flex: 1, background: '#18181b', border: '1px solid #27272a', borderRadius: '6px', padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '9.5px', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Topic Rating</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#4ade80', marginTop: '2px' }}>+{Math.round(badgeAwardModal.rating)} Elo</div>
+                </div>
+                <div style={{ flex: 1, background: '#18181b', border: '1px solid #27272a', borderRadius: '6px', padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '9.5px', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Test Verdict</div>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#60a5fa', marginTop: '2px' }}>Passed (2/2)</div>
+                </div>
               </div>
             )}
 
-            <div className="celebration-actions">
+            {/* Actions */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <button
-                className="coach-btn celebration-btn-primary"
+                className="coach-btn"
+                style={{ width: '100%', padding: '8px 14px', fontSize: '11.5px', fontWeight: '600', background: '#18181b', color: '#f4f4f5', border: '1px solid #3f3f46', borderRadius: '6px', cursor: 'pointer' }}
                 onClick={() => {
                   setBadgeAwardModal(null);
                   setActiveTab('mastery');
@@ -2675,7 +2757,7 @@ export default function App() {
               </button>
               <button
                 className="abandon-btn"
-                style={{ width: '100%', marginTop: '6px', textAlign: 'center', background: '#18181b', color: '#a1a1aa', border: '1px solid #27272a' }}
+                style={{ width: '100%', background: 'transparent', border: 'none', color: '#71717a', fontSize: '11px', padding: '6px', cursor: 'pointer' }}
                 onClick={() => setBadgeAwardModal(null)}
               >
                 Close & Continue
@@ -2742,64 +2824,6 @@ export default function App() {
             <button className="coach-btn" onClick={() => setShowScorecardModal(false)} style={{ width: '100%' }}>
               Close Scorecard
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Badge Test Submit Confirmation Modal */}
-      {showBadgeSubmitConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '340px', padding: '18px', color: '#f4f4f5', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }}>
-            <div style={{ fontSize: '24px', marginBottom: '8px' }}>🏁</div>
-            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px', color: '#22c55e' }}>Submit Badge Test?</h3>
-            <p style={{ fontSize: '12px', color: '#a1a1aa', margin: '0 0 16px 0', lineHeight: '1.4' }}>
-              Are you ready to submit your test for evaluation? Both problems must be solved in LeetCode to pass.
-            </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <button
-                className="coach-btn"
-                style={{ flex: 1, background: '#22c55e', color: '#09090b', fontWeight: 'bold' }}
-                onClick={submitBadgeTest}
-              >
-                Yes, Submit Test
-              </button>
-              <button
-                className="abandon-btn"
-                style={{ flex: 1 }}
-                onClick={() => setShowBadgeSubmitConfirm(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Badge Test Abandon Confirmation Modal */}
-      {showBadgeAbandonConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#0e0e10', border: '1px solid #ef444466', borderRadius: '12px', width: '100%', maxWidth: '340px', padding: '18px', color: '#f4f4f5', textAlign: 'center', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }}>
-            <div style={{ fontSize: '24px', marginBottom: '8px' }}>⚠️</div>
-            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px', color: '#f87171' }}>Abandon Badge Test?</h3>
-            <p style={{ fontSize: '12px', color: '#a1a1aa', margin: '0 0 16px 0', lineHeight: '1.4' }}>
-              Are you sure you want to exit and abandon this test? All active test progress will be lost and test integrity locks will be removed.
-            </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <button
-                className="coach-btn"
-                style={{ flex: 1, background: '#ef4444', color: '#ffffff', fontWeight: 'bold' }}
-                onClick={abandonBadgeTest}
-              >
-                Yes, Exit Test
-              </button>
-              <button
-                className="abandon-btn"
-                style={{ flex: 1 }}
-                onClick={() => setShowBadgeAbandonConfirm(false)}
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         </div>
       )}
