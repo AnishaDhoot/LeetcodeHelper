@@ -125,9 +125,29 @@ const applyReadOnlyState = (isReadOnly) => {
   }
 };
 
+window.__dsaTutorInitialCodeByUri = window.__dsaTutorInitialCodeByUri || new Map();
+
+const captureInitialCodeForModel = (model) => {
+  try {
+    if (!model || !model.uri) return;
+    const key = model.uri.toString();
+    if (!window.__dsaTutorInitialCodeByUri.has(key)) {
+      window.__dsaTutorInitialCodeByUri.set(key, model.getValue());
+    }
+  } catch (e) { /* ignore */ }
+};
+
 // Poll and subscribe to new Monaco editors to lock them automatically
 const initMonacoListeners = () => {
   if (window.monaco && window.monaco.editor) {
+    // Capture starter code for existing models
+    (window.monaco.editor.getModels() || []).forEach(captureInitialCodeForModel);
+
+    // Capture starter code for models created later (language switches, new problems)
+    window.monaco.editor.onDidCreateModel((model) => {
+      captureInitialCodeForModel(model);
+    });
+
     // Intercept future editor creations
     window.monaco.editor.onDidCreateEditor((editor) => {
       if (window.__dsaTutorReadOnly) {
@@ -475,6 +495,41 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
+      // --- Attempt 1: Direct Monaco model reset (reliable, no click simulation needed) ---
+      let directResetDone = false;
+      try {
+        const models = window.monaco?.editor?.getModels() || [];
+        let bestModel = null;
+        let maxLen = -1;
+        for (const m of models) {
+          const uriStr = m.uri ? m.uri.toString() : '';
+          if (uriStr.includes('input') || uriStr.includes('testcase')) continue;
+          const val = m.getValue() || '';
+          if (val.length > maxLen) {
+            maxLen = val.length;
+            bestModel = m;
+          }
+        }
+        if (bestModel) {
+          const key = bestModel.uri.toString();
+          const initialCode = window.__dsaTutorInitialCodeByUri?.get(key);
+          if (initialCode !== undefined) {
+            bestModel.setValue(initialCode);
+            directResetDone = true;
+          }
+        }
+      } catch (e) {
+        console.warn('[DSA Tutor Injected] Direct model reset failed, falling back to UI click:', e);
+      }
+
+      if (directResetDone) {
+        if (window.__dsaTutorReadOnly) {
+          setTimeout(() => applyReadOnlyState(true), 100);
+        }
+        return;
+      }
+
+      // --- Attempt 2: DOM click simulation fallback ---
       let resetAttempts = 0;
       let resetDone = false;
 
