@@ -162,7 +162,7 @@ const scrapeProblemIdentity = () => {
 window.dsaTutor = Object.assign(window.dsaTutor || {}, {
   getCode: getCodeFromPage,
   getLanguage: scrapeCurrentLanguage,
-  getConstraints: scrapeProblemConstraints,
+  getConstraints: scrapeConstraints,
   getIdentity: scrapeProblemIdentity,
   resetEditor: () => {
     window.postMessage({ type: 'RESET_EDITOR' }, '*');

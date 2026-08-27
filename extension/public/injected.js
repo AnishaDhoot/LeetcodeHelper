@@ -1,8 +1,8 @@
 // Intercept fetch and XMLHttpRequest for LeetCode submission check results
-(function() {
+(function () {
   const origFetch = window.fetch;
   if (origFetch) {
-    window.fetch = async function(...args) {
+    window.fetch = async function (...args) {
       const response = await origFetch.apply(this, args);
       try {
         const url = (typeof args[0] === 'string' ? args[0] : args[0]?.url || '').toLowerCase();
@@ -17,9 +17,9 @@
                 verdict: statusMsg === 'Accepted' ? 'Accepted' : statusMsg
               }, '*');
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
-      } catch (e) {}
+      } catch (e) { }
       return response;
     };
   }
@@ -28,12 +28,12 @@
   if (origXHR && origXHR.prototype) {
     const origOpen = origXHR.prototype.open;
     const origSend = origXHR.prototype.send;
-    origXHR.prototype.open = function(method, url) {
+    origXHR.prototype.open = function (method, url) {
       this._url = url;
       return origOpen.apply(this, arguments);
     };
-    origXHR.prototype.send = function() {
-      this.addEventListener('load', function() {
+    origXHR.prototype.send = function () {
+      this.addEventListener('load', function () {
         try {
           const url = (this._url || '').toLowerCase();
           if (url.includes('/submissions/') || url.includes('/check/') || url.includes('/graphql')) {
@@ -46,7 +46,7 @@
               }, '*');
             }
           }
-        } catch (e) {}
+        } catch (e) { }
       });
       return origSend.apply(this, arguments);
     };
@@ -452,7 +452,7 @@ window.addEventListener("message", (event) => {
           if (area) code = area.value || area.textContent || "";
         }
       }
-      
+
       window.postMessage({ type: "CODE_VALUE", code: code }, window.location.origin);
     } catch (e) {
       console.error("[DSA Tutor Injected] Error reading Monaco editor:", e);
@@ -479,9 +479,9 @@ window.addEventListener("message", (event) => {
           try {
             const evt = new MouseEvent(evtType, { bubbles: true, cancelable: true, view: window });
             el.dispatchEvent(evt);
-          } catch (e) {}
+          } catch (e) { }
         });
-        try { el.click(); } catch (e) {}
+        try { el.click(); } catch (e) { }
       };
 
       const findResetButton = () => {
