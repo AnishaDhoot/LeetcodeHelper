@@ -468,6 +468,11 @@ window.addEventListener("message", (event) => {
     applyAssessmentTabLocking(event.data.locked, event.data.reason);
   }
 
+  if (event.data && event.data.type === "PING_INJECTED") {
+    window.__dsaTutorInjectedReady = true;
+    window.postMessage({ type: 'DSA_TUTOR_INJECTED_READY' }, '*');
+  }
+
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
       let resetAttempts = 0;
@@ -590,3 +595,7 @@ setInterval(() => {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
   }
 }, 1000);
+
+// Notify content script that injected script is loaded and listening
+window.__dsaTutorInjectedReady = true;
+window.postMessage({ type: 'DSA_TUTOR_INJECTED_READY' }, '*');

@@ -158,6 +158,20 @@ const scrapeProblemIdentity = () => {
   return { problemId, problemTitle };
 };
 
+let injectedReady = !!window.__dsaTutorInjectedReady;
+let pendingReset = false;
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window || !event.data) return;
+  if (event.data.type === 'DSA_TUTOR_INJECTED_READY') {
+    injectedReady = true;
+    if (pendingReset) {
+      pendingReset = false;
+      window.postMessage({ type: 'RESET_EDITOR' }, '*');
+    }
+  }
+});
+
 // Initialize window.dsaTutor scrapers and reset handlers
 window.dsaTutor = Object.assign(window.dsaTutor || {}, {
   getCode: getCodeFromPage,
@@ -165,6 +179,12 @@ window.dsaTutor = Object.assign(window.dsaTutor || {}, {
   getConstraints: scrapeConstraints,
   getIdentity: scrapeProblemIdentity,
   resetEditor: () => {
+    if (!injectedReady && !window.__dsaTutorInjectedReady) {
+      pendingReset = true;
+      window.postMessage({ type: 'PING_INJECTED' }, '*');
+      window.postMessage({ type: 'RESET_EDITOR' }, '*');
+      return;
+    }
     window.postMessage({ type: 'RESET_EDITOR' }, '*');
     if (window.__dsaTutorResetEditor) {
       try { window.__dsaTutorResetEditor(); } catch (e) { }
