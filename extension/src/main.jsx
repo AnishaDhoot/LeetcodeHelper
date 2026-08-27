@@ -385,7 +385,7 @@ setInterval(checkUrlChange, 1000);
 window.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'LEETCODE_SUBMISSION_RESULT') {
     const verdict = event.data.verdict;
-    if (verdict) {
+    if (verdict && isWithinSubmitGrace()) {
       const { problemId } = scrapeProblemIdentity();
       const subKey = `${problemId}_${verdict}`;
       const now = Date.now();
@@ -649,9 +649,6 @@ window.dsaTutor.setEditorReadOnly = (readOnly) => {
 window.dsaTutor.setAssessmentLocked = (locked, reason) => {
   applyDirectTabLocking(locked, reason);
   window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked, reason }, '*');
-};
-window.dsaTutor.resetEditor = () => {
-  window.postMessage({ type: 'RESET_EDITOR' }, '*');
 };
 
 // Start observing
