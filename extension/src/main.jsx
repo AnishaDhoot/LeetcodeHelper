@@ -420,8 +420,9 @@ const checkNodeForVerdict = (node) => {
         return;
       }
 
-      // For non-Accepted verdicts, require submit intent
-      if (v !== 'Accepted' && !isWithinGrace) {
+      // Require submit intent for ALL verdicts, including Accepted — otherwise any
+      // stray "Accepted" text node (cached badge, stale re-render, etc.) counts as a solve.
+      if (!isWithinGrace) {
         return;
       }
 
