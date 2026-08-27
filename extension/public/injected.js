@@ -315,31 +315,6 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
   injectLockCSS(isLocked);
 
   try {
-    const curHref = window.location.href;
-    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
-    const isSubmissionListOrDetailRoute = (
-      curHref.includes("/editorial") ||
-      curHref.includes("/solutions") ||
-      curHref.includes("/submissions/detail") ||
-      curHref.includes("/discussion") ||
-      curHref.includes("/discussions") ||
-      curHref.includes("/comments") ||
-      curHref.includes("/community")
-    );
-
-    const isForbiddenRoute = (
-      isSubmissionListOrDetailRoute ||
-      (isSubmissionResultRoute && !isWithinSubmitGrace())
-    );
-
-    // If currently on a forbidden route, immediately redirect back to /description/
-    if (isLocked && isForbiddenRoute) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, "/description/");
-      if (cleanUrl !== curHref) {
-        safeRedirect(cleanUrl);
-      }
-    }
-
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
 
     if (isLocked) {
@@ -440,30 +415,6 @@ document.addEventListener("click", (e) => {
     e.stopPropagation();
     e.stopImmediatePropagation();
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
-
-    const curHref = window.location.href;
-    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
-    const isSubmissionListOrDetailRoute = (
-      curHref.includes("/editorial") ||
-      curHref.includes("/solutions") ||
-      curHref.includes("/submissions/detail") ||
-      curHref.includes("/discussion") ||
-      curHref.includes("/discussions") ||
-      curHref.includes("/comments") ||
-      curHref.includes("/community")
-    );
-
-    const isForbiddenRoute = (
-      isSubmissionListOrDetailRoute ||
-      (isSubmissionResultRoute && !isWithinSubmitGrace())
-    );
-
-    if (isForbiddenRoute) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, "/description/");
-      if (cleanUrl !== curHref) {
-        safeRedirect(cleanUrl);
-      }
-    }
     return false;
   }
 }, true);

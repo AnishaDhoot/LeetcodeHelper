@@ -559,38 +559,12 @@ const isForbiddenDOMElement = (el) => {
   return false;
 };
 
-const applyDirectTabLocking = (locked, reason = 'Badge Test') => {
+const applyDirectTabLocking = (locked, reason = 'Assessment Mode') => {
   directAssessmentLocked = !!locked;
   directAssessmentReason = reason || '';
   injectDirectLockCSS(locked);
 
   if (locked) {
-    const curHref = window.location.href;
-    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
-    const isSubmissionListOrDetailRoute = (
-      curHref.includes('/solution') ||
-      curHref.includes('/solutions') ||
-      curHref.includes('/editorial') ||
-      curHref.includes('/editorials') ||
-      curHref.includes('/discussion') ||
-      curHref.includes('/discussions') ||
-      curHref.includes('/comments') ||
-      curHref.includes('/community') ||
-      curHref.includes('/submissions/detail')
-    );
-
-    const isForbiddenRoute = (
-      isSubmissionListOrDetailRoute ||
-      (isSubmissionResultRoute && !isWithinSubmitGrace())
-    );
-
-    if (isForbiddenRoute) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, '/description/');
-      if (cleanUrl !== curHref) {
-        safeRedirect(cleanUrl);
-      }
-    }
-
     const tabs = Array.from(document.querySelectorAll('a, button, [role="tab"], [data-layout-path], [data-key], [data-track-load], div[class*="tab"], div[class*="nav"], li'));
     tabs.forEach(el => {
       if (el.closest('#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container')) return;
@@ -634,32 +608,6 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     e.stopImmediatePropagation();
     applyDirectTabLocking(true, directAssessmentReason);
-
-    const curHref = window.location.href;
-    const isSubmissionResultRoute = /\/submissions\/\d+\/?$/.test(curHref);
-    const isSubmissionListOrDetailRoute = (
-      curHref.includes('/solution') ||
-      curHref.includes('/solutions') ||
-      curHref.includes('/editorial') ||
-      curHref.includes('/editorials') ||
-      curHref.includes('/discussion') ||
-      curHref.includes('/discussions') ||
-      curHref.includes('/comments') ||
-      curHref.includes('/community') ||
-      curHref.includes('/submissions/detail')
-    );
-
-    const isForbiddenRoute = (
-      isSubmissionListOrDetailRoute ||
-      (isSubmissionResultRoute && !isWithinSubmitGrace())
-    );
-
-    if (isForbiddenRoute) {
-      const cleanUrl = curHref.replace(/\/(editorial|solutions?|discussions?|community|submissions\/detail[^\s/]*|submissions\/\d+[^\s/]*)[^/]*\/?/gi, '/description/');
-      if (cleanUrl !== curHref) {
-        safeRedirect(cleanUrl);
-      }
-    }
     return false;
   }
 }, true);
