@@ -167,7 +167,7 @@ window.dsaTutor = Object.assign(window.dsaTutor || {}, {
   resetEditor: () => {
     window.postMessage({ type: 'RESET_EDITOR' }, '*');
     if (window.__dsaTutorResetEditor) {
-      try { window.__dsaTutorResetEditor(); } catch (e) {}
+      try { window.__dsaTutorResetEditor(); } catch (e) { }
     }
   }
 });
@@ -177,6 +177,8 @@ window.dsaTutor = Object.assign(window.dsaTutor || {}, {
 // ============================================================================
 
 let lastTriggerTime = 0; // Prevents repeated triggers for the same verdict burst
+const processedVerdictNodes = new WeakSet();
+const lastDetectedSubmissions = new Map();
 
 const scrapeFailingTestcase = () => {
   let input = '';
@@ -325,7 +327,7 @@ document.addEventListener('click', (e) => {
   const txt = (btn.textContent || '').trim().toLowerCase();
   const locator = (btn.getAttribute('data-e2e-locator') || '').toLowerCase();
   const testId = (btn.getAttribute('data-testid') || '').toLowerCase();
-  
+
   // STRICT CHECK: ONLY track clicks on the actual "Submit" button, NOT "Run" or "Run Code"
   const isSubmitBtn = (
     locator.includes('submit') ||
@@ -405,7 +407,7 @@ const checkNodeForVerdict = (node) => {
 
       // Mark element as processed now that we know it's a valid submission verdict
       processedVerdictNodes.add(node);
-      try { node.dataset.dsaProcessed = "true"; } catch (e) {}
+      try { node.dataset.dsaProcessed = "true"; } catch (e) { }
 
       // Reset submission timestamp
       lastSubmitClickTimestamp = 0;
@@ -640,14 +642,14 @@ const injectSpacedRepetitionReminder = () => {
   chrome.runtime.sendMessage({ action: 'get_recommendation' }, (res) => {
     if (res && res.success && res.data && res.data.reviews && res.data.reviews.length > 0) {
       const dueReviews = res.data.reviews;
-      
+
       // Prevent duplicates
       if (document.getElementById('dsa-tutor-spaced-reminder')) return;
-      
+
       // Create container
       const reminderDiv = document.createElement('div');
       reminderDiv.id = 'dsa-tutor-spaced-reminder';
-      
+
       // Inline styling for the premium reminder card
       Object.assign(reminderDiv.style, {
         position: 'fixed',
@@ -666,7 +668,7 @@ const injectSpacedRepetitionReminder = () => {
         flexDirection: 'column',
         gap: '12px'
       });
-      
+
       const headerDiv = document.createElement('div');
       Object.assign(headerDiv.style, {
         display: 'flex',
@@ -675,12 +677,12 @@ const injectSpacedRepetitionReminder = () => {
         borderBottom: '1px solid #1f1f23',
         paddingBottom: '8px'
       });
-      
+
       const titleSpan = document.createElement('span');
       titleSpan.innerHTML = '⏰ <strong>Review Due Today</strong>';
       titleSpan.style.fontSize = '13px';
       titleSpan.style.color = '#f4f4f5';
-      
+
       const closeBtn = document.createElement('button');
       closeBtn.innerText = '✕';
       Object.assign(closeBtn.style, {
@@ -694,11 +696,11 @@ const injectSpacedRepetitionReminder = () => {
       closeBtn.onclick = () => {
         reminderDiv.remove();
       };
-      
+
       headerDiv.appendChild(titleSpan);
       headerDiv.appendChild(closeBtn);
       reminderDiv.appendChild(headerDiv);
-      
+
       const descDiv = document.createElement('div');
       descDiv.innerText = 'Maintain your memory strength by practicing these spaced repetition items today:';
       Object.assign(descDiv.style, {
@@ -707,7 +709,7 @@ const injectSpacedRepetitionReminder = () => {
         lineHeight: '1.4'
       });
       reminderDiv.appendChild(descDiv);
-      
+
       const listContainer = document.createElement('div');
       Object.assign(listContainer.style, {
         display: 'flex',
@@ -716,7 +718,7 @@ const injectSpacedRepetitionReminder = () => {
         maxHeight: '180px',
         overflowY: 'auto'
       });
-      
+
       dueReviews.forEach((rev) => {
         const itemA = document.createElement('a');
         itemA.href = rev.url;
@@ -734,7 +736,7 @@ const injectSpacedRepetitionReminder = () => {
           fontSize: '12px',
           transition: 'all 0.2s'
         });
-        
+
         itemA.onmouseenter = () => {
           itemA.style.borderColor = '#3b82f6';
           itemA.style.backgroundColor = '#1c1c21';
@@ -743,7 +745,7 @@ const injectSpacedRepetitionReminder = () => {
           itemA.style.borderColor = '#27272a';
           itemA.style.backgroundColor = '#18181b';
         };
-        
+
         const textSpan = document.createElement('span');
         textSpan.innerText = rev.title;
         textSpan.style.fontWeight = '500';
@@ -751,7 +753,7 @@ const injectSpacedRepetitionReminder = () => {
         textSpan.style.textOverflow = 'ellipsis';
         textSpan.style.whiteSpace = 'nowrap';
         textSpan.style.maxWidth = '180px';
-        
+
         const diffSpan = document.createElement('span');
         diffSpan.innerText = rev.difficulty;
         Object.assign(diffSpan.style, {
@@ -761,7 +763,7 @@ const injectSpacedRepetitionReminder = () => {
           borderRadius: '4px',
           textTransform: 'uppercase'
         });
-        
+
         if (rev.difficulty.toLowerCase() === 'easy') {
           diffSpan.style.color = '#22c55e';
           diffSpan.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
@@ -772,12 +774,12 @@ const injectSpacedRepetitionReminder = () => {
           diffSpan.style.color = '#ef4444';
           diffSpan.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
         }
-        
+
         itemA.appendChild(textSpan);
         itemA.appendChild(diffSpan);
         listContainer.appendChild(itemA);
       });
-      
+
       reminderDiv.appendChild(listContainer);
       document.body.appendChild(reminderDiv);
     }
