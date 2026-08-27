@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-// 1. Create container for the extension panel inside the Shadow DOM (to prevent style clashing)
 const rootId = 'dsa-tutor-panel-root';
 let rootDiv = document.getElementById(rootId);
 
@@ -21,19 +20,16 @@ if (!rootDiv) {
 
   const shadowRoot = rootDiv.attachShadow({ mode: 'open' });
 
-  // Create wrapper inside shadow root
   const reactContainer = document.createElement('div');
   reactContainer.id = 'dsa-tutor-react-container';
   reactContainer.style.pointerEvents = 'auto';
   shadowRoot.appendChild(reactContainer);
 
-  // Load styling inside Shadow DOM
   const styleLink = document.createElement('link');
   styleLink.rel = 'stylesheet';
   styleLink.href = chrome.runtime.getURL('content.css');
   shadowRoot.appendChild(styleLink);
 
-  // Render React App
   ReactDOM.createRoot(reactContainer).render(
     <React.StrictMode>
       <App />
@@ -41,7 +37,6 @@ if (!rootDiv) {
   );
 }
 
-// 2. Inject injected.js into the main page context to access window.monaco
 const injectScript = () => {
   const scriptId = 'dsa-tutor-injected-script';
   if (document.getElementById(scriptId)) return;
@@ -54,13 +49,6 @@ const injectScript = () => {
 
 injectScript();
 
-// ============================================================================
-// 3. On-demand context scrapers (used by the Code Coach tab in React)
-//    Exposed on window.dsaTutor so the React layer can await them directly.
-// ============================================================================
-
-// Request the current editor code from the page-context script (injected.js).
-// Returns a Promise<string> resolving to the Monaco editor contents.
 const getCodeFromPage = (timeoutMs = 300) => {
   return new Promise((resolve) => {
     let settled = false;
@@ -74,7 +62,6 @@ const getCodeFromPage = (timeoutMs = 300) => {
     window.addEventListener('message', onCodeReceived);
     window.postMessage({ type: 'REQUEST_CODE' }, window.location.origin);
 
-    // Fallback: resolve with empty string if injected.js never replies.
     setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -84,10 +71,8 @@ const getCodeFromPage = (timeoutMs = 300) => {
   });
 };
 
-// Detect the currently selected language from LeetCode's editor toolbar.
 const scrapeCurrentLanguage = () => {
   try {
-    // LeetCode renders the active language as a button label in the editor header.
     const langBtn = document.querySelector(
       '[class*="editor-language"] button, [data-mode], [class*="lang-selector"] button, button[aria-haspopup="listbox"]'
     );
@@ -95,7 +80,6 @@ const scrapeCurrentLanguage = () => {
       const txt = (langBtn.getAttribute('data-mode') || langBtn.textContent || '').trim();
       if (txt) return txt;
     }
-    // Fallback: scan the editor header container text for known languages.
     const header = document.querySelector('[class*="header"] [class*="right"]');
     if (header) {
       const known = ['C++', 'Java', 'Python', 'Python3', 'JavaScript', 'TypeScript', 'Go', 'Rust', 'Ruby', 'C', 'C#', 'Swift', 'Kotlin', 'PHP', 'Scala'];
@@ -110,10 +94,8 @@ const scrapeCurrentLanguage = () => {
   return 'python3';
 };
 
-// Scrape the problem's constraints list from the description pane.
 const scrapeConstraints = () => {
   try {
-    // Look for a heading containing "Constraints", then collect the following list items.
     const headings = Array.from(document.querySelectorAll('p, li, strong, h2, h3, div'));
     let constraintStart = null;
     for (const el of headings) {
@@ -124,19 +106,16 @@ const scrapeConstraints = () => {
       }
     }
     if (constraintStart) {
-      // Constraints are typically a <ul> immediately after the heading, or siblings.
       let list = constraintStart.nextElementSibling?.querySelector?.('li')
         ? constraintStart.nextElementSibling
         : null;
       if (!list) {
-        // Walk forward through siblings collecting list items.
         list = constraintStart.parentElement;
       }
       const items = list ? list.querySelectorAll('li') : [];
       const out = [];
       items.forEach((li) => {
         const text = (li.textContent || '').trim();
-        // Only keep items that look like constraints (contain digits / comparisons / m/n).
         if (text && (/\d/.test(text) || /<=|>=|<|>/.test(text))) {
           out.push(text);
         }
@@ -149,7 +128,6 @@ const scrapeConstraints = () => {
   return null;
 };
 
-// Extract current problem identity from URL + document title.
 const scrapeProblemIdentity = () => {
   const urlMatch = window.location.href.match(/problems\/([^/]+)/);
   const problemId = urlMatch ? urlMatch[1] : 'unknown-problem';
@@ -172,7 +150,6 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// Initialize window.dsaTutor scrapers and reset handlers
 window.dsaTutor = Object.assign(window.dsaTutor || {}, {
   getCode: getCodeFromPage,
   getLanguage: scrapeCurrentLanguage,
@@ -192,11 +169,7 @@ window.dsaTutor = Object.assign(window.dsaTutor || {}, {
   }
 });
 
-// ============================================================================
-// 4. Observe the LeetCode DOM for submission verdicts (auto-diagnosis)
-// ============================================================================
-
-let lastTriggerTime = 0; // Prevents repeated triggers for the same verdict burst
+let lastTriggerTime = 0;
 const processedVerdictNodes = new WeakSet();
 const lastDetectedSubmissions = new Map();
 
@@ -205,7 +178,6 @@ const scrapeFailingTestcase = () => {
   let expected = '';
   let actual = '';
 
-  // Scan text elements on the page for labels
   const allElements = Array.from(document.querySelectorAll('div, span, p'));
   for (const el of allElements) {
     const text = el.textContent?.trim();
@@ -232,11 +204,9 @@ const handleVerdictDetected = async (verdict, node) => {
 
   const { problemId, problemTitle } = scrapeProblemIdentity();
 
-  // Update React UI state to Loading
   window.dsaTutor?.setLoading(true);
 
   if (verdict === 'Accepted') {
-    // For Accepted submissions, just notify backend to update mastery score (no LLM logic needed)
     chrome.runtime.sendMessage({
       action: 'analyze_submission',
       payload: {
@@ -271,7 +241,6 @@ const handleVerdictDetected = async (verdict, node) => {
     return;
   }
 
-  // For failed submissions, request editor code from page-context (injected.js)
   const code = await getCodeFromPage();
   if (!code) {
     window.dsaTutor?.setError('Failed to retrieve code from Monaco editor: empty code');
@@ -280,14 +249,12 @@ const handleVerdictDetected = async (verdict, node) => {
 
   const testCases = scrapeFailingTestcase();
 
-  // Check for compile errors or red alert text in LeetCode page to pass as error details
   let errorDetails = '';
   const errEls = document.querySelectorAll('[class*="compile-error"], [class*="err-msg"]');
   if (errEls.length > 0) {
     errorDetails = Array.from(errEls).map(el => el.textContent?.trim()).join('\n');
   }
 
-  // Call background script API analysis endpoint
   chrome.runtime.sendMessage({
     action: 'analyze_submission',
     payload: {
@@ -319,7 +286,7 @@ const handleVerdictDetected = async (verdict, node) => {
 
 let lastSubmitClickTimestamp = 0;
 let recentSubmitAt = 0;
-const SUBMIT_GRACE_MS = 15000; // covers slow judge queue times
+const SUBMIT_GRACE_MS = 15000;
 
 function markSubmitIntent() {
   recentSubmitAt = Date.now();
@@ -340,7 +307,6 @@ function safeRedirect(path) {
   window.location.replace(path);
 }
 
-// Mouse click detection for Submit button
 document.addEventListener('click', (e) => {
   const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"], [data-cypress="submit-code-btn"]') : null;
   if (!btn) return;
@@ -348,7 +314,6 @@ document.addEventListener('click', (e) => {
   const locator = (btn.getAttribute('data-e2e-locator') || '').toLowerCase();
   const testId = (btn.getAttribute('data-testid') || '').toLowerCase();
 
-  // STRICT CHECK: ONLY track clicks on the actual "Submit" button, NOT "Run" or "Run Code"
   const isSubmitBtn = (
     locator.includes('submit') ||
     testId.includes('submit') ||
@@ -362,18 +327,18 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-// Keyboard shortcut detection (Ctrl+Enter / Cmd+Enter on LeetCode)
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
     markSubmitIntent();
   }
 }, true);
 
-// SPA URL change listener to keep problem state in sync
 let lastHref = window.location.href;
 const checkUrlChange = () => {
   if (window.location.href !== lastHref) {
     lastHref = window.location.href;
+    recentSubmitAt = 0;
+    lastSubmitClickTimestamp = 0;
     window.dispatchEvent(new CustomEvent('dsa-tutor-url-change', { detail: { url: lastHref } }));
   }
 };
@@ -381,7 +346,6 @@ window.addEventListener('popstate', checkUrlChange);
 window.addEventListener('hashchange', checkUrlChange);
 setInterval(checkUrlChange, 1000);
 
-// Listen for native LeetCode API intercepted submission events
 window.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'LEETCODE_SUBMISSION_RESULT') {
     const verdict = event.data.verdict;
@@ -407,12 +371,10 @@ const checkNodeForVerdict = (node) => {
 
   const verdicts = ['Accepted', 'Wrong Answer', 'Time Limit Exceeded', 'Runtime Error', 'Compile Error', 'Memory Limit Exceeded'];
   for (const v of verdicts) {
-    // Only match small text leaves (like status badges) to avoid match triggers on large parent divs.
     if (text === v || (text.includes(v) && text.length < 40)) {
       const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
-      const isWithinGrace = (lastSubmitClickTimestamp > 0 && timeSinceSubmit <= 60000) || isWithinSubmitGrace();
+      const isWithinGrace = isWithinSubmitGrace();
 
-      // If strictly a sample testcase result, ignore
       const isRunSampleOnly = !!node.closest(
         '[data-e2e-locator="console-result"], [data-layout-path*="testcase"], [class*="run-code"], [class*="run-result"], [class*="testcase-result"]'
       );
@@ -420,25 +382,21 @@ const checkNodeForVerdict = (node) => {
         return;
       }
 
-      // Require submit intent for ALL verdicts, including Accepted — otherwise any
-      // stray "Accepted" text node (cached badge, stale re-render, etc.) counts as a solve.
       if (!isWithinGrace) {
         return;
       }
 
-      // Mark element as processed now that we know it's a valid submission verdict
       processedVerdictNodes.add(node);
       try { node.dataset.dsaProcessed = "true"; } catch (e) { }
 
-      // Reset submission timestamp
       lastSubmitClickTimestamp = 0;
+      recentSubmitAt = 0;
 
       const { problemId } = scrapeProblemIdentity();
       const subKey = `${problemId}_${v}`;
       const now = Date.now();
       const lastTime = lastDetectedSubmissions.get(subKey) || 0;
 
-      // Suppress duplicate triggers for the same problem + verdict within 3 seconds
       if (now - lastTime < 3000) {
         return;
       }
@@ -450,15 +408,12 @@ const checkNodeForVerdict = (node) => {
   }
 };
 
-// Set up MutationObserver to detect when submission result cards appear
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     if (mutation.addedNodes.length === 0) continue;
     for (const node of mutation.addedNodes) {
       if (node.nodeType === Node.ELEMENT_NODE) {
-        // Direct checks
         checkNodeForVerdict(node);
-        // Deep search
         const childVerdicts = node.querySelectorAll && node.querySelectorAll('*');
         if (childVerdicts) {
           for (const cv of childVerdicts) {
@@ -470,7 +425,6 @@ const observer = new MutationObserver((mutations) => {
   }
 });
 
-// Direct Content Script Fairplay Locking for Solutions, Editorial, Discussions, and Submissions
 const injectDirectLockCSS = (isLocked) => {
   let styleEl = document.getElementById('dsa-tutor-fairplay-css');
   if (isLocked) {
@@ -527,7 +481,6 @@ const isForbiddenDOMElement = (el) => {
     const role = (curr.getAttribute ? curr.getAttribute('role') || '' : '').toLowerCase();
     const cls = (curr.className && typeof curr.className === 'string' ? curr.className : '').toLowerCase();
 
-    // NEVER lock the real submit button
     const isSubmitActionBtn = (
       curr.getAttribute?.('data-e2e-locator') === 'console-submit-button' ||
       curr.getAttribute?.('data-cypress') === 'submit-code-btn' ||
@@ -635,9 +588,6 @@ document.addEventListener('click', (e) => {
   }
 }, true);
 
-// ============================================================================
-// 5. Expose on-demand context helpers for the React Code Coach layer
-// ============================================================================
 window.dsaTutor = window.dsaTutor || {};
 window.dsaTutor.getCode = getCodeFromPage;
 window.dsaTutor.getLanguage = scrapeCurrentLanguage;
@@ -651,24 +601,19 @@ window.dsaTutor.setAssessmentLocked = (locked, reason) => {
   window.postMessage({ type: 'SET_ASSESSMENT_LOCKED', locked, reason }, '*');
 };
 
-// Start observing
 observer.observe(document.body, { childList: true, subtree: true });
 console.log('[DSA Tutor Content] DOM observer and overlay UI initialized.');
 
-// Spaced Repetition Reminder banner injection on LeetCode page load
 const injectSpacedRepetitionReminder = () => {
   chrome.runtime.sendMessage({ action: 'get_recommendation' }, (res) => {
     if (res && res.success && res.data && res.data.reviews && res.data.reviews.length > 0) {
       const dueReviews = res.data.reviews;
 
-      // Prevent duplicates
       if (document.getElementById('dsa-tutor-spaced-reminder')) return;
 
-      // Create container
       const reminderDiv = document.createElement('div');
       reminderDiv.id = 'dsa-tutor-spaced-reminder';
 
-      // Inline styling for the premium reminder card
       Object.assign(reminderDiv.style, {
         position: 'fixed',
         bottom: '24px',
@@ -804,7 +749,6 @@ const injectSpacedRepetitionReminder = () => {
   });
 };
 
-// Inject when document is fully loaded or active
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
   injectSpacedRepetitionReminder();
 } else {

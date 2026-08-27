@@ -1,4 +1,3 @@
-// Intercept fetch and XMLHttpRequest for LeetCode submission check results
 (function () {
   const origFetch = window.fetch;
   if (origFetch) {
@@ -53,11 +52,9 @@
   }
 })();
 
-// Function to apply/enforce readOnly state on Monaco + DOM overlay
 const applyReadOnlyState = (isReadOnly) => {
   window.__dsaTutorReadOnly = !!isReadOnly;
 
-  // 1. Monaco Editor API
   try {
     if (window.monaco && window.monaco.editor) {
       const editors = window.monaco.editor.getEditors();
@@ -71,7 +68,6 @@ const applyReadOnlyState = (isReadOnly) => {
     console.warn("[DSA Tutor Injected] Error updating Monaco readOnly:", e);
   }
 
-  // 2. DOM-level Overlay for LeetCode Editor Container
   try {
     const editorEl = document.querySelector(".monaco-editor, .CodeMirror, [class*='editor-container'], [class*='editor'], [data-mode-id], div[class*='monaco']");
     let lockOverlay = document.getElementById("dsa-tutor-editor-lock-overlay");
@@ -134,21 +130,52 @@ const captureInitialCodeForModel = (model) => {
     if (!window.__dsaTutorInitialCodeByUri.has(key)) {
       window.__dsaTutorInitialCodeByUri.set(key, model.getValue());
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) { }
 };
 
-// Poll and subscribe to new Monaco editors to lock them automatically
+const getActiveCodeModel = () => {
+  const editors = window.monaco?.editor?.getEditors() || [];
+  const candidates = [];
+
+  for (const editor of editors) {
+    const model = editor.getModel && editor.getModel();
+    if (!model || !model.uri) continue;
+    candidates.push({ editor, model });
+  }
+
+  console.log('[DSA Tutor Injected] getActiveCodeModel candidates:', candidates.map(c => c.model.uri.toString()));
+
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0].model;
+
+  let best = null;
+  let bestArea = -1;
+  for (const c of candidates) {
+    try {
+      const dom = c.editor.getDomNode ? c.editor.getDomNode() : null;
+      if (!dom) continue;
+      const rect = dom.getBoundingClientRect();
+      const area = rect.width * rect.height;
+      console.log('[DSA Tutor Injected] candidate area:', c.model.uri.toString(), area);
+      if (area > bestArea) {
+        bestArea = area;
+        best = c.model;
+      }
+    } catch (e) { }
+  }
+
+  if (best) return best;
+  return candidates[0].model;
+};
+
 const initMonacoListeners = () => {
   if (window.monaco && window.monaco.editor) {
-    // Capture starter code for existing models
     (window.monaco.editor.getModels() || []).forEach(captureInitialCodeForModel);
 
-    // Capture starter code for models created later (language switches, new problems)
     window.monaco.editor.onDidCreateModel((model) => {
       captureInitialCodeForModel(model);
     });
 
-    // Intercept future editor creations
     window.monaco.editor.onDidCreateEditor((editor) => {
       if (window.__dsaTutorReadOnly) {
         editor.updateOptions({ readOnly: true });
@@ -170,7 +197,7 @@ window.__dsaTutorAssessmentLocked = false;
 window.__dsaTutorLockReason = "";
 
 let recentSubmitAt = 0;
-const SUBMIT_GRACE_MS = 15000; // covers slow judge queue times
+const SUBMIT_GRACE_MS = 15000;
 
 function markSubmitIntent() {
   recentSubmitAt = Date.now();
@@ -185,35 +212,10 @@ const REDIRECT_COOLDOWN_MS = 2000;
 
 function safeRedirect(path) {
   const now = Date.now();
-  if (now - lastRedirectAt < REDIRECT_COOLDOWN_MS) return; // already handled recently
+  if (now - lastRedirectAt < REDIRECT_COOLDOWN_MS) return;
   lastRedirectAt = now;
   window.location.replace(path);
 }
-
-// Track submit clicks in page context
-document.addEventListener("click", (e) => {
-  const btn = e.target ? e.target.closest('button, [data-e2e-locator="console-submit-button"], [data-cypress="submit-code-btn"]') : null;
-  if (!btn) return;
-  const txt = (btn.textContent || '').trim().toLowerCase();
-  const locator = (btn.getAttribute('data-e2e-locator') || '').toLowerCase();
-  const testId = (btn.getAttribute('data-testid') || '').toLowerCase();
-  const isSubmitBtn = (
-    locator.includes('submit') ||
-    testId.includes('submit') ||
-    txt === 'submit' ||
-    txt === 'submit code' ||
-    (txt.includes('submit') && !txt.includes('run'))
-  );
-  if (isSubmitBtn) {
-    markSubmitIntent();
-  }
-}, true);
-
-document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-    markSubmitIntent();
-  }
-}, true);
 
 const injectLockCSS = (isLocked) => {
   let styleEl = document.getElementById("dsa-tutor-fairplay-css");
@@ -249,7 +251,6 @@ const injectLockCSS = (isLocked) => {
   }
 };
 
-// Helper to determine if an element or any of its ancestors is a forbidden tab / link / panel
 const isForbiddenElement = (el) => {
   if (!el || el === document.body) return false;
   if (el.closest && el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror")) {
@@ -272,7 +273,6 @@ const isForbiddenElement = (el) => {
     const role = (curr.getAttribute ? curr.getAttribute("role") || "" : "").toLowerCase();
     const cls = (curr.className && typeof curr.className === "string" ? curr.className : "").toLowerCase();
 
-    // NEVER lock the real submit button
     const isSubmitActionBtn = (
       curr.getAttribute?.("data-e2e-locator") === "console-submit-button" ||
       curr.getAttribute?.("data-cypress") === "submit-code-btn" ||
@@ -328,7 +328,6 @@ const isForbiddenElement = (el) => {
   return false;
 };
 
-// Function to hide / disable forbidden tabs in LeetCode during Assessment / Mock Mode
 const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
   window.__dsaTutorAssessmentLocked = !!isLocked;
   window.__dsaTutorLockReason = reason || "";
@@ -338,7 +337,6 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
     let lockOverlay = document.getElementById("dsa-tutor-tab-lock-overlay");
 
     if (isLocked) {
-      // Find and hide LeetCode tab buttons strictly across all candidate elements
       const tabs = Array.from(document.querySelectorAll('a, button, [role="tab"], [data-layout-path], [data-key], [data-track-load], div[class*="tab"], div[class*="nav"], li'));
       tabs.forEach(el => {
         if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return;
@@ -355,10 +353,12 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
         }
       });
 
-      // If user is currently directly viewing an Editorial/Solutions/Discussion panel:
       const panelContainer = document.querySelector(
         "div[data-layout-path*='editorial'], div[data-layout-path*='solution'], div[data-layout-path*='solutions'], div[data-layout-path*='discussion'], div[data-layout-path*='discussions']"
       );
+
+      const currentPath = window.location.pathname.toLowerCase();
+      const isForbiddenRoute = /\/(editorial|solutions?|discuss(ion)?s?|submissions)(\/|$)/.test(currentPath);
 
       if ((isForbiddenRoute || panelContainer) && !document.getElementById("dsa-tutor-tab-lock-overlay")) {
         const mountTarget = panelContainer || document.querySelector(".elfjS, [data-track-load='description_content']")?.parentElement || document.body;
@@ -419,14 +419,13 @@ const applyAssessmentTabLocking = (isLocked, reason = "Assessment Mode") => {
   }
 };
 
-// Intercept clicks strictly on navigation tabs when locked
 document.addEventListener("click", (e) => {
   if (!window.__dsaTutorAssessmentLocked) return;
 
   const path = e.composedPath ? e.composedPath() : [];
   for (const el of path) {
     if (el && el.id && (el.id === "dsa-tutor-panel-root" || el.id === "dsa-tutor-react-container" || el.id === "dsa-tutor-panel-container")) {
-      return; // Clicks inside extension panel must NEVER be intercepted
+      return;
     }
   }
 
@@ -440,29 +439,16 @@ document.addEventListener("click", (e) => {
 }, true);
 
 window.addEventListener("message", (event) => {
-  // Only accept messages from ourselves
   if (event.source !== window) return;
 
   if (event.data && event.data.type === "REQUEST_CODE") {
     try {
-      const models = window.monaco?.editor?.getModels();
       let code = "";
-      if (models && models.length > 0) {
-        let bestModel = models[0];
-        let maxLen = bestModel.getValue() ? bestModel.getValue().length : 0;
-        for (let i = 1; i < models.length; i++) {
-          const m = models[i];
-          const val = m.getValue() || "";
-          const uriStr = m.uri ? m.uri.toString() : "";
-          if (!uriStr.includes("input") && !uriStr.includes("testcase") && val.length > maxLen) {
-            maxLen = val.length;
-            bestModel = m;
-          }
-        }
+      const bestModel = getActiveCodeModel();
+      if (bestModel) {
         code = bestModel.getValue();
       }
 
-      // DOM fallback if Monaco model was missing or empty
       if (!code) {
         const viewLines = document.querySelectorAll(".view-lines .view-line");
         if (viewLines.length > 0) {
@@ -495,24 +481,15 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
-      // --- Attempt 1: Direct Monaco model reset (reliable, no click simulation needed) ---
       let directResetDone = false;
       try {
-        const models = window.monaco?.editor?.getModels() || [];
-        let bestModel = null;
-        let maxLen = -1;
-        for (const m of models) {
-          const uriStr = m.uri ? m.uri.toString() : '';
-          if (uriStr.includes('input') || uriStr.includes('testcase')) continue;
-          const val = m.getValue() || '';
-          if (val.length > maxLen) {
-            maxLen = val.length;
-            bestModel = m;
-          }
-        }
+        const bestModel = getActiveCodeModel();
+        console.log('[DSA Tutor Injected] RESET_EDITOR chose model:', bestModel ? bestModel.uri.toString() : null);
+        console.log('[DSA Tutor Injected] snapshot map keys:', Array.from(window.__dsaTutorInitialCodeByUri?.keys() || []));
         if (bestModel) {
           const key = bestModel.uri.toString();
           const initialCode = window.__dsaTutorInitialCodeByUri?.get(key);
+          console.log('[DSA Tutor Injected] snapshot found for chosen model:', initialCode !== undefined, initialCode !== undefined ? initialCode.length : null);
           if (initialCode !== undefined) {
             bestModel.setValue(initialCode);
             directResetDone = true;
@@ -529,7 +506,6 @@ window.addEventListener("message", (event) => {
         return;
       }
 
-      // --- Attempt 2: DOM click simulation fallback ---
       let resetAttempts = 0;
       let resetDone = false;
 
@@ -565,7 +541,6 @@ window.addEventListener("message", (event) => {
           return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('retrieve') || str.includes('rotate') || str.includes('undo');
         });
 
-        // Also search inside editor header toolbars specifically
         if (!resetBtn) {
           const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"], [class*="toolbar"], [class*="editor-actions"]');
           for (const bar of editorToolbars) {
@@ -608,14 +583,12 @@ window.addEventListener("message", (event) => {
         const resetBtn = findResetButton();
         if (resetBtn) {
           triggerClick(resetBtn);
-          // Stagger modal confirmations
           [40, 100, 200, 350, 600, 1000, 1500, 2500].forEach(delay => {
             setTimeout(tryConfirmModal, delay);
           });
         }
       };
 
-      // Immediate and repeated intervals to catch DOM hydration in SPAs
       executeReset();
       const resetPollInterval = setInterval(() => {
         resetAttempts++;
@@ -625,7 +598,6 @@ window.addEventListener("message", (event) => {
         }
       }, 300);
 
-      // Re-apply readOnly state if locked
       if (window.__dsaTutorReadOnly) {
         setTimeout(() => {
           applyReadOnlyState(true);
@@ -637,20 +609,17 @@ window.addEventListener("message", (event) => {
   }
 });
 
-// Continuously enforce readOnly & overlay state while readOnly is active
 setInterval(() => {
   if (window.__dsaTutorReadOnly) {
     applyReadOnlyState(true);
   }
 }, 400);
 
-// Continuously enforce assessment locking while assessment is active
 setInterval(() => {
   if (window.__dsaTutorAssessmentLocked) {
     applyAssessmentTabLocking(true, window.__dsaTutorLockReason);
   }
 }, 1000);
 
-// Notify content script that injected script is loaded and listening
 window.__dsaTutorInjectedReady = true;
 window.postMessage({ type: 'DSA_TUTOR_INJECTED_READY' }, '*');
