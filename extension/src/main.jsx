@@ -476,14 +476,14 @@ const injectDirectLockCSS = (isLocked) => {
       styleEl = document.createElement('style');
       styleEl.id = 'dsa-tutor-fairplay-css';
       styleEl.textContent = `
-        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions/detail"],
-        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"],
-        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"],
+        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"], a[href*="/submission"],
+        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submission"], div[data-layout-path*="submissions"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submission"], [data-track-load*="submissions"],
+        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        div[class*="past-submissions"], div[class*="submissions-list"], div[class*="submission-list"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"] {
+        div[class*="past-submissions"], div[class*="submissions-list"], div[class*="submission-list"], div[class*="submission-detail"],
+        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"], section[class*="submissions"] {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -540,19 +540,24 @@ const isForbiddenDOMElement = (el) => {
     if (
       href.includes('/editorial') || href.includes('/solution') || href.includes('/solutions') ||
       href.includes('/discussion') || href.includes('/discussions') || href.includes('/community') ||
-      href.includes('/comments') || href.includes('/submissions/detail') || /\/submissions\/\d+/.test(href) ||
+      href.includes('/comments') || href.includes('/submissions') || href.includes('/submission') ||
       dataPath.includes('editorial') || dataPath.includes('solution') || dataPath.includes('discussion') ||
-      dataPath.includes('community') ||
+      dataPath.includes('community') || dataPath.includes('submission') ||
       dataKey.includes('editorial') || dataKey.includes('solution') || dataKey.includes('discussion') ||
-      dataKey.includes('community') ||
+      dataKey.includes('community') || dataKey.includes('submission') ||
       dataTrack.includes('editorial') || dataTrack.includes('solution') || dataTrack.includes('discussion') ||
+      dataTrack.includes('submission') ||
       (ariaLabel.includes('solution') && !ariaLabel.includes('submit')) ||
       ariaLabel.includes('editorial') || ariaLabel.includes('discussion') ||
       ariaLabel.includes('community') || ariaLabel.includes('comment') ||
+      ariaLabel.includes('past submission') || (ariaLabel.includes('submission') && !ariaLabel.includes('submit')) ||
       (title.includes('solution') && !title.includes('submit')) ||
       title.includes('editorial') || title.includes('discussion') ||
-      idStr.includes('editorial') || idStr.includes('discussion') ||
-      cls.includes('editorial') || cls.includes('solution') || cls.includes('discussion') || cls.includes('submissions-list') || cls.includes('submission-list')
+      (title.includes('submission') && !title.includes('submit')) ||
+      idStr.includes('editorial') || idStr.includes('discussion') || idStr.includes('submission') ||
+      cls.includes('editorial') || cls.includes('solution') || cls.includes('discussion') ||
+      cls.includes('submissions-list') || cls.includes('submission-list') || cls.includes('past-submissions') ||
+      cls.includes('submission-detail')
     ) {
       return true;
     }
@@ -565,6 +570,7 @@ const isForbiddenDOMElement = (el) => {
         text === 'editorial' || text.startsWith('editorial') ||
         text === 'solutions' || text === 'solution' || text.startsWith('solutions') ||
         text === 'discussion' || text === 'discussions' || text.startsWith('discussion') ||
+        text === 'submissions' || text === 'submission' || text.startsWith('submission') ||
         text === 'past submissions' || text === 'submission history' ||
         text === 'community' || text === 'comments'
       ) {
