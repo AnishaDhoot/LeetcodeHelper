@@ -1058,7 +1058,16 @@ export default function App() {
       }
     });
 
+    const handleGlobalKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setBadgeAwardModal(null);
+        setShowScorecardModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+
     return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
       // Only remove our own handlers; leave the scraper helpers intact.
       if (window.dsaTutor) {
         delete window.dsaTutor.setLoading;
@@ -2700,9 +2709,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Badge Awarded Result Modal (Minimalist Developer UI) */}
+      {/* Badge Awarded Result Modal (Refined Developer UI) */}
       {badgeAwardModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setBadgeAwardModal(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 10, 12, 0.65)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setBadgeAwardModal(null)}>
           <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '380px', padding: '20px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1f1f23', paddingBottom: '12px', marginBottom: '16px' }}>
               <div style={{ fontSize: '13px', fontWeight: '600', color: '#f4f4f5', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -2715,21 +2724,21 @@ export default function App() {
             {/* Badge Card */}
             <div style={{ background: '#141417', border: '1px solid #27272a', borderRadius: '8px', padding: '16px', textAlign: 'center', marginBottom: '14px' }}>
               <div style={{ fontSize: '36px', marginBottom: '8px', lineHeight: '1' }}>
-                {getBadgeEmoji(badgeAwardModal.badge)}
+                {getBadgeEmoji(badgeAwardModal?.badge || 'Bronze')}
               </div>
-              <div style={{ display: 'inline-block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '2px 8px', borderRadius: '4px', background: badgeAwardModal.badge === 'Bronze' ? 'rgba(217, 119, 6, 0.15)' : badgeAwardModal.badge === 'Silver' ? 'rgba(228, 228, 231, 0.15)' : 'rgba(234, 179, 8, 0.15)', color: badgeAwardModal.badge === 'Bronze' ? '#f59e0b' : badgeAwardModal.badge === 'Silver' ? '#e4e4e7' : '#fbbf24', border: '1px solid currentColor', marginBottom: '8px' }}>
-                Level {badgeAwardModal.level} • {badgeAwardModal.badge}
+              <div style={{ display: 'inline-block', fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '2px 8px', borderRadius: '4px', background: badgeAwardModal?.badge === 'Bronze' ? 'rgba(217, 119, 6, 0.15)' : badgeAwardModal?.badge === 'Silver' ? 'rgba(228, 228, 231, 0.15)' : 'rgba(234, 179, 8, 0.15)', color: badgeAwardModal?.badge === 'Bronze' ? '#f59e0b' : badgeAwardModal?.badge === 'Silver' ? '#e4e4e7' : '#fbbf24', border: '1px solid currentColor', marginBottom: '8px' }}>
+                Level {badgeAwardModal?.level ?? 1} • {badgeAwardModal?.badge || 'Bronze'}
               </div>
               <div style={{ fontSize: '14px', fontWeight: '700', color: '#f4f4f5' }}>
-                {badgeAwardModal.topic}
+                {badgeAwardModal?.topic || 'Topic'}
               </div>
               <div style={{ fontSize: '11px', color: '#a1a1aa', marginTop: '4px', lineHeight: '1.4' }}>
-                You solved both test problems and earned the {badgeAwardModal.badge} badge!
+                You solved both test problems and earned the {badgeAwardModal?.badge || 'Bronze'} badge!
               </div>
             </div>
 
             {/* Stats Row */}
-            {badgeAwardModal.rating && (
+            {badgeAwardModal?.rating ? (
               <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                 <div style={{ flex: 1, background: '#18181b', border: '1px solid #27272a', borderRadius: '6px', padding: '8px 10px', textAlign: 'center' }}>
                   <div style={{ fontSize: '9.5px', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Topic Rating</div>
@@ -2740,7 +2749,7 @@ export default function App() {
                   <div style={{ fontSize: '14px', fontWeight: '700', color: '#60a5fa', marginTop: '2px' }}>Passed (2/2)</div>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Actions */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -2769,8 +2778,8 @@ export default function App() {
 
       {/* Scorecard Modal */}
       {showScorecardModal && mockScorecard && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '400px', padding: '18px', color: '#f4f4f5', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 10, 12, 0.65)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setShowScorecardModal(false)}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '400px', padding: '18px', color: '#f4f4f5', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.6)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #27272a', paddingBottom: '10px', marginBottom: '12px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 🏆 Mock Interview Scorecard

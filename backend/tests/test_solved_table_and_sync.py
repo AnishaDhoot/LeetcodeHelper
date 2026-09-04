@@ -113,11 +113,13 @@ def test_company_fallback_to_focused_and_weak_topics():
     p1 = Problem(id="tree-node-1", title="Tree Node 1", url="https://leetcode.com/problems/tree-node-1/", difficulty="Easy", topics="Trees", is_solved=False)
     p2 = Problem(id="tree-node-2", title="Tree Node 2", url="https://leetcode.com/problems/tree-node-2/", difficulty="Easy", topics="Trees", is_solved=False)
     p3 = Problem(id="tree-node-3", title="Tree Node 3", url="https://leetcode.com/problems/tree-node-3/", difficulty="Easy", topics="Trees", is_solved=False)
-    db.add_all([p1, p2, p3])
+    db.merge(p1)
+    db.merge(p2)
+    db.merge(p3)
 
     # Set focus on Trees
     cfg = UserConfig(key="focus_topic", value="Trees")
-    db.add(cfg)
+    db.merge(cfg)
     db.commit()
     db.close()
 

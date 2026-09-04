@@ -208,6 +208,22 @@ def _ensure_schema():
     try:
         if db_conn.query(Problem).count() == 0:
             print("[Warning] Problems table is empty! Please run 'python backend/seed.py' to seed the database.")
+        
+        # Smoothly redistribute clumped Stage 1 reviews if a massive batch shares the exact same timestamp
+        sr_count = db_conn.query(SpacedRepetition).count()
+        if sr_count > 20:
+            clumped = db_conn.query(SpacedRepetition).filter(SpacedRepetition.stage == 1).all()
+            # If > 50 stage 1 items are identical/overdue from initial batch import, stagger them
+            if len(clumped) > 50:
+                now_val = get_utc_now()
+                # Check if > 50 items share identical minute
+                time_groups = Counter([str(sr.next_due)[:16] for sr in clumped])
+                most_common_count = time_groups.most_common(1)[0][1] if time_groups else 0
+                if most_common_count > 50:
+                    for i, sr in enumerate(clumped):
+                        stagger_offset = 1 + (abs(hash(sr.problem_id or str(i))) % 14)
+                        sr.next_due = now_val + timedelta(days=stagger_offset)
+                    db_conn.commit()
     except Exception as e:
         print(f"Database check warning: {e}")
     finally:
@@ -1195,11 +1211,13 @@ def sync_solved(req: SyncSolvedRequest, db: Session = Depends(get_db)):
 
         # Seed initial spaced repetition schedule for solved problem
         if prob.problem_id not in existing_srs:
+            # Stagger initial due dates for bulk imports across 3..25 days so reviews don't clump on one day
+            stagger_days = 3 if len(req.problems) == 1 else (3 + (abs(hash(prob.problem_id)) % 22))
             sr = SpacedRepetition(
                 problem_id=prob.problem_id,
                 stage=1,
                 last_solved=actual_solve_dt,
-                next_due=now_utc + timedelta(days=3)
+                next_due=now_utc + timedelta(days=stagger_days)
             )
             db.add(sr)
 

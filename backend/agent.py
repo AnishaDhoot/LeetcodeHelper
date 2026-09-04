@@ -41,20 +41,18 @@ def query_ollama(prompt: str, system_prompt: str) -> str:
         raise e
 
 def query_groq(prompt: str, system_prompt: str) -> str:
-    """Queries Groq API as a cloud fallback, handling JSON schema enforcement and model failovers."""
+    """Queries Groq API as a cloud fallback, handling JSON schema enforcement and fast model failovers."""
     api_key = get_groq_api_key()
     if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is not set")
     
-    client = Groq(api_key=api_key)
+    # 10s client timeout prevents long network hangs
+    client = Groq(api_key=api_key, timeout=10.0)
     target_model = get_groq_model()
     candidate_models = [
         target_model,
         "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
-        "openai/gpt-oss-20b",
-        "openai/gpt-oss-120b",
-        "mixtral-8x7b-32768",
         "gemma2-9b-it"
     ]
     

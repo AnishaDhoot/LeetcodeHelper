@@ -422,6 +422,10 @@ def get_next_problem(db: Session, focus_topic=None, company: str = None) -> dict
             })
             due_problem_ids.add(prob.id)
 
+    # Sort reviews by urgency (earliest due date first) and cap to top 10 to avoid queue overload
+    reviews.sort(key=lambda x: x["due_date"] if x.get("due_date") else now)
+    reviews = reviews[:10]
+
     # 2. Build base problem pool (strictly non-premium — Tier 1.1)
     def _pool_query():
         q = db.query(Problem).filter(
