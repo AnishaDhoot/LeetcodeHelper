@@ -586,6 +586,7 @@ window.addEventListener("message", (event) => {
           if (match && match.code) {
             console.log('[DSA Tutor Injected] Applied official starter code via GraphQL for', titleSlug, match.langSlug);
             bestModel.setValue(match.code);
+            [20, 80, 200, 500, 1000].forEach(delay => setTimeout(tryConfirmModal, delay));
             return true;
           }
         } catch (e) {
@@ -597,6 +598,18 @@ window.addEventListener("message", (event) => {
       const debugReset = (msg, data) => {
         console.log(`[DSA Tutor DEBUG] ${msg}`, data !== undefined ? data : '');
       };
+
+      // Temporarily auto-approve native window.confirm dialogs during reset so user is never prompted
+      const origConfirm = window.confirm;
+      if (origConfirm) {
+        window.confirm = function (...args) {
+          debugReset('Auto-approving window.confirm dialog during reset', args);
+          return true;
+        };
+        setTimeout(() => {
+          window.confirm = origConfirm;
+        }, 4000);
+      }
 
       let resetAttempts = 0;
       let resetDone = false;
@@ -612,6 +625,7 @@ window.addEventListener("message", (event) => {
               debugReset('Snapshot fallback applied', { uri: key, length: initialCode.length });
               console.warn('[DSA Tutor Injected] Native reset button not found — falling back to snapshot');
               bestModel.setValue(initialCode);
+              [20, 80, 200, 500, 1000].forEach(delay => setTimeout(tryConfirmModal, delay));
             }
           }
         } catch (e) {
@@ -678,17 +692,22 @@ window.addEventListener("message", (event) => {
 
       const tryConfirmModal = () => {
         const confirmBtns = Array.from(document.querySelectorAll(
-          'button, div[role="button"], [data-cy*="confirm" i], [data-cypress*="confirm" i], [data-e2e-locator*="confirm" i], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, [class*="confirm"], [class*="danger"], [role="dialog"] button, button.ant-btn-primary'
+          'button, div[role="button"], [data-cy*="confirm" i], [data-cy*="discard" i], [data-cypress*="confirm" i], [data-cypress*="discard" i], [data-e2e-locator*="confirm" i], [data-e2e-locator*="discard" i], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, [class*="confirm"], [class*="discard"], [class*="danger"], [role="dialog"] button, button.ant-btn-primary, button.ant-btn-dangerous'
         ));
         const confirmBtn = confirmBtns.find(b => {
           if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
           const txt = (b.textContent || '').trim().toLowerCase();
           const cls = (b.className || '').toLowerCase();
           const cy = ((b.getAttribute('data-cy') || '') + ' ' + (b.getAttribute('data-cypress') || '')).toLowerCase();
-          return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm') || cls.includes('danger') || cls.includes('brand-orange') || cy.includes('confirm');
+          return (
+            txt === 'confirm' || txt === 'discard' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt === 'overwrite' ||
+            txt.includes('discard') || txt.includes('reset code') || txt.includes('confirm') || txt.includes('overwrite') ||
+            cls.includes('confirm') || cls.includes('discard') || cls.includes('danger') || cls.includes('brand-orange') ||
+            cy.includes('confirm') || cy.includes('discard')
+          );
         });
         if (confirmBtn) {
-          debugReset('tryConfirmModal found confirm button', confirmBtn);
+          debugReset('tryConfirmModal found confirm/discard button', confirmBtn);
           triggerClick(confirmBtn);
           resetDone = true;
           return true;
