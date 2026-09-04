@@ -224,15 +224,14 @@ const injectLockCSS = (isLocked) => {
       styleEl = document.createElement("style");
       styleEl.id = "dsa-tutor-fairplay-css";
       styleEl.textContent = `
-        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"],
-        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submission"], div[data-layout-path*="submissions"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submission"], [data-track-load*="submissions"],
-        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
-        [id*="submission-tab"], [id*="submissions-tab"], [data-tab*="submission"], [data-tab*="submissions"],
+        a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions/detail"],
+        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"],
+        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"], div[class*="submission-detail"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"] {
+        div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"],
+        section[class*="discussion"], section[class*="comment"], section[class*="community"] {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -253,7 +252,7 @@ const injectLockCSS = (isLocked) => {
 
 const isForbiddenElement = (el) => {
   if (!el || el === document.body) return false;
-  if (el.closest && el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror")) {
+  if (el.closest && el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror, [data-layout-path*='editor'], [data-layout-path*='console'], [data-layout-path*='terminal'], [data-e2e-locator*='console'], [data-e2e-locator*='submission-result'], [class*='result'], [class*='verdict'], [class*='status'], [class*='testcase']")) {
     return false;
   }
 
@@ -280,26 +279,25 @@ const isForbiddenElement = (el) => {
       text === "submit code" ||
       ((ariaLabel === "submit" || title === "submit") && (curr.tagName === "BUTTON" || role === "button"))
     );
-    if (isSubmitActionBtn && !dataPath.includes("submission") && !cls.includes("tab")) {
+    if (isSubmitActionBtn) {
       return false;
     }
 
     if (
       href.includes("/editorial") || href.includes("/solution") || href.includes("/solutions") ||
       href.includes("/discussion") || href.includes("/discussions") || href.includes("/community") ||
-      href.includes("/comments") || href.includes("/submissions") ||
+      href.includes("/comments") || href.includes("/submissions/detail") || /\/submissions\/\d+/.test(href) ||
       dataPath.includes("editorial") || dataPath.includes("solution") || dataPath.includes("discussion") ||
-      dataPath.includes("community") || dataPath.includes("submission") ||
+      dataPath.includes("community") ||
       dataKey.includes("editorial") || dataKey.includes("solution") || dataKey.includes("discussion") ||
-      dataKey.includes("community") || dataKey.includes("submission") ||
+      dataKey.includes("community") ||
       dataTrack.includes("editorial") || dataTrack.includes("solution") || dataTrack.includes("discussion") ||
-      dataTrack.includes("submission") || dataTrack.includes("submissions") ||
       (ariaLabel.includes("solution") && !ariaLabel.includes("submit")) ||
-      ariaLabel.includes("editorial") || ariaLabel.includes("discussion") || ariaLabel.includes("submission") ||
+      ariaLabel.includes("editorial") || ariaLabel.includes("discussion") ||
       ariaLabel.includes("community") || ariaLabel.includes("comment") ||
       (title.includes("solution") && !title.includes("submit")) ||
-      title.includes("editorial") || title.includes("discussion") || title.includes("submission") ||
-      idStr.includes("editorial") || idStr.includes("discussion") || idStr.includes("submission") ||
+      title.includes("editorial") || title.includes("discussion") ||
+      idStr.includes("editorial") || idStr.includes("discussion") ||
       cls.includes("editorial") || cls.includes("solution") || cls.includes("discussion") ||
       cls.includes("submissions-list") || cls.includes("submission-list") || cls.includes("past-submissions")
     ) {
@@ -314,8 +312,8 @@ const isForbiddenElement = (el) => {
         text === "editorial" || text.startsWith("editorial") ||
         text === "solutions" || text === "solution" || text.startsWith("solutions") ||
         text === "discussion" || text === "discussions" || text.startsWith("discussion") ||
-        text === "submissions" || text.startsWith("submissions") || text.includes("past submission") ||
-        text === "submission history" || text === "community" || text === "comments"
+        text === "past submissions" || text === "submission history" ||
+        text === "community" || text === "comments"
       ) {
         return true;
       }

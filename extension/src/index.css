@@ -893,68 +893,126 @@
 /* ── Review section ── */
 .review-section {
   margin-top: 20px;
-  border-top: 1px solid #1a1a1e;
+  border-top: 1px solid #27272a;
   padding-top: 16px;
 }
 
 .review-card {
-  background: #111113;
-  border: 1px solid #1f1f23;
-  border-radius: 7px;
-  padding: 10px 12px;
-  margin-bottom: 7px;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 9px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: border-color 0.15s;
+  gap: 12px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .review-card:hover {
-  border-color: #27272a;
+  border-color: #3f3f46;
+  background: #1c1c20;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .review-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
 }
 
 .review-title-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .review-title {
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   color: #f4f4f5;
+  letter-spacing: -0.01em;
 }
 
 .review-meta {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .review-badge {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 2px 5px;
-  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: #a1a1aa;
-  background: #18181b;
-  border: 1px solid #27272a;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+}
+
+.review-badge.stage-1 {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.review-badge.stage-2 {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.12);
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.review-badge.stage-3 {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(167, 139, 250, 0.3);
+}
+
+.review-badge.stage-4 {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.review-link-btn {
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  color: #f4f4f5;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.review-link-btn:hover {
+  background: #3b82f6;
+  border-color: #60a5fa;
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 
 .review-action-btn {
   background: #18181b;
   border: 1px solid #27272a;
   color: #a1a1aa;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   display: flex;
   align-items: center;

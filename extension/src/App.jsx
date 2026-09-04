@@ -2551,8 +2551,8 @@ export default function App() {
 
       {/* AI Weekly DSA Digest Modal */}
       {showWeeklyModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '520px', maxHeight: '85vh', overflowY: 'auto', padding: '20px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 10, 12, 0.65)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setShowWeeklyModal(false)}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '520px', maxHeight: '85vh', overflowY: 'auto', padding: '20px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #27272a', paddingBottom: '12px', marginBottom: '16px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2647,8 +2647,8 @@ export default function App() {
 
       {/* Badge Test Submit Confirmation Modal */}
       {showBadgeSubmitConfirm && activeTest && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '380px', padding: '18px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 10, 12, 0.65)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }} onClick={() => setShowBadgeSubmitConfirm(false)}>
+          <div style={{ background: '#0e0e10', border: '1px solid #27272a', borderRadius: '12px', width: '100%', maxWidth: '380px', padding: '18px', color: '#f4f4f5', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #27272a', paddingBottom: '10px', marginBottom: '14px' }}>
               <h3 style={{ margin: 0, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 🏆 Submit Badge Test

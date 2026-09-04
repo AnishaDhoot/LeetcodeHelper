@@ -436,12 +436,12 @@ const injectDirectLockCSS = (isLocked) => {
       styleEl.id = 'dsa-tutor-fairplay-css';
       styleEl.textContent = `
         a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions/detail"],
-        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submission"], div[data-layout-path*="submissions"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submissions"],
-        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
+        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"],
+        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"], div[class*="submission-detail"],
+        div[class*="past-submissions"], div[class*="submissions-list"], div[class*="submission-list"],
         section[class*="discussion"], section[class*="comment"], section[class*="community"] {
           display: none !important;
           visibility: hidden !important;
@@ -464,7 +464,7 @@ let directAssessmentReason = '';
 
 const isForbiddenDOMElement = (el) => {
   if (!el || el === document.body) return false;
-  if (el.closest && el.closest('#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror')) {
+  if (el.closest && el.closest('#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror, [data-layout-path*="editor"], [data-layout-path*="console"], [data-layout-path*="terminal"], [data-e2e-locator*="console"], [data-e2e-locator*="submission-result"], [class*="result"], [class*="verdict"], [class*="status"], [class*="testcase"]')) {
     return false;
   }
 
@@ -491,7 +491,7 @@ const isForbiddenDOMElement = (el) => {
       text === 'submit code' ||
       ((ariaLabel === 'submit' || title === 'submit') && (curr.tagName === 'BUTTON' || role === 'button'))
     );
-    if (isSubmitActionBtn && !dataPath.includes('submission') && !cls.includes('tab')) {
+    if (isSubmitActionBtn) {
       return false;
     }
 
@@ -500,11 +500,10 @@ const isForbiddenDOMElement = (el) => {
       href.includes('/discussion') || href.includes('/discussions') || href.includes('/community') ||
       href.includes('/comments') || href.includes('/submissions/detail') || /\/submissions\/\d+/.test(href) ||
       dataPath.includes('editorial') || dataPath.includes('solution') || dataPath.includes('discussion') ||
-      dataPath.includes('community') || dataPath.includes('submission') ||
+      dataPath.includes('community') ||
       dataKey.includes('editorial') || dataKey.includes('solution') || dataKey.includes('discussion') ||
-      dataKey.includes('community') || dataKey.includes('submission') ||
+      dataKey.includes('community') ||
       dataTrack.includes('editorial') || dataTrack.includes('solution') || dataTrack.includes('discussion') ||
-      dataTrack.includes('submissions') ||
       (ariaLabel.includes('solution') && !ariaLabel.includes('submit')) ||
       ariaLabel.includes('editorial') || ariaLabel.includes('discussion') ||
       ariaLabel.includes('community') || ariaLabel.includes('comment') ||
@@ -524,7 +523,7 @@ const isForbiddenDOMElement = (el) => {
         text === 'editorial' || text.startsWith('editorial') ||
         text === 'solutions' || text === 'solution' || text.startsWith('solutions') ||
         text === 'discussion' || text === 'discussions' || text.startsWith('discussion') ||
-        text === 'submissions' || text === 'past submissions' || text === 'submission history' ||
+        text === 'past submissions' || text === 'submission history' ||
         text === 'community' || text === 'comments'
       ) {
         return true;
@@ -621,18 +620,20 @@ const injectSpacedRepetitionReminder = () => {
         position: 'fixed',
         bottom: '24px',
         left: '24px',
-        width: '320px',
-        backgroundColor: '#0e0e10',
-        border: '1px solid #1f1f23',
+        width: '340px',
+        backgroundColor: '#121214',
+        border: '1px solid #27272a',
         borderRadius: '12px',
         padding: '16px',
-        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4)',
+        boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
         zIndex: '999999',
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         color: '#f4f4f5',
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px'
+        gap: '12px',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)'
       });
 
       const headerDiv = document.createElement('div');
@@ -640,14 +641,17 @@ const injectSpacedRepetitionReminder = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderBottom: '1px solid #1f1f23',
-        paddingBottom: '8px'
+        borderBottom: '1px solid #27272a',
+        paddingBottom: '10px'
       });
 
       const titleSpan = document.createElement('span');
-      titleSpan.innerHTML = '⏰ <strong>Review Due Today</strong>';
+      titleSpan.innerHTML = '<span style="color: #60a5fa; margin-right: 6px;">⏰</span><strong>Spaced Repetition Due</strong>';
       titleSpan.style.fontSize = '13px';
+      titleSpan.style.fontWeight = '600';
       titleSpan.style.color = '#f4f4f5';
+      titleSpan.style.display = 'flex';
+      titleSpan.style.alignItems = 'center';
 
       const closeBtn = document.createElement('button');
       closeBtn.innerText = '✕';
@@ -657,8 +661,11 @@ const injectSpacedRepetitionReminder = () => {
         color: '#71717a',
         cursor: 'pointer',
         fontSize: '14px',
-        padding: '2px 6px'
+        padding: '2px 6px',
+        borderRadius: '4px'
       });
+      closeBtn.onmouseenter = () => { closeBtn.style.color = '#f4f4f5'; };
+      closeBtn.onmouseleave = () => { closeBtn.style.color = '#71717a'; };
       closeBtn.onclick = () => {
         reminderDiv.remove();
       };
@@ -668,9 +675,9 @@ const injectSpacedRepetitionReminder = () => {
       reminderDiv.appendChild(headerDiv);
 
       const descDiv = document.createElement('div');
-      descDiv.innerText = 'Maintain your memory strength by practicing these spaced repetition items today:';
+      descDiv.innerText = 'Strengthen your memory retention with today\'s prioritized reviews:';
       Object.assign(descDiv.style, {
-        fontSize: '11px',
+        fontSize: '11.5px',
         color: '#a1a1aa',
         lineHeight: '1.4'
       });
@@ -681,7 +688,7 @@ const injectSpacedRepetitionReminder = () => {
         display: 'flex',
         flexDirection: 'column',
         gap: '8px',
-        maxHeight: '180px',
+        maxHeight: '190px',
         overflowY: 'auto'
       });
 
@@ -693,55 +700,79 @@ const injectSpacedRepetitionReminder = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 10px',
+          padding: '9px 12px',
           backgroundColor: '#18181b',
           border: '1px solid #27272a',
-          borderRadius: '6px',
+          borderRadius: '8px',
           textDecoration: 'none',
-          color: '#e4e4e7',
+          color: '#f4f4f5',
           fontSize: '12px',
-          transition: 'all 0.2s'
+          transition: 'all 0.15s ease'
         });
 
         itemA.onmouseenter = () => {
           itemA.style.borderColor = '#3b82f6';
           itemA.style.backgroundColor = '#1c1c21';
+          itemA.style.transform = 'translateY(-1px)';
         };
         itemA.onmouseleave = () => {
           itemA.style.borderColor = '#27272a';
           itemA.style.backgroundColor = '#18181b';
+          itemA.style.transform = 'none';
         };
+
+        const titleCol = document.createElement('div');
+        Object.assign(titleCol.style, {
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '2px',
+          overflow: 'hidden',
+          maxWidth: '190px'
+        });
 
         const textSpan = document.createElement('span');
         textSpan.innerText = rev.title;
-        textSpan.style.fontWeight = '500';
+        textSpan.style.fontWeight = '600';
+        textSpan.style.fontSize = '12px';
         textSpan.style.overflow = 'hidden';
         textSpan.style.textOverflow = 'ellipsis';
         textSpan.style.whiteSpace = 'nowrap';
-        textSpan.style.maxWidth = '180px';
+        textSpan.style.color = '#f4f4f5';
+
+        const stageSpan = document.createElement('span');
+        stageSpan.innerText = `Stage ${rev.stage || 1} • Due`;
+        stageSpan.style.fontSize = '9.5px';
+        stageSpan.style.color = '#a1a1aa';
+
+        titleCol.appendChild(textSpan);
+        titleCol.appendChild(stageSpan);
 
         const diffSpan = document.createElement('span');
         diffSpan.innerText = rev.difficulty;
         Object.assign(diffSpan.style, {
           fontSize: '9px',
           fontWeight: '700',
-          padding: '2px 5px',
+          padding: '2px 6px',
           borderRadius: '4px',
-          textTransform: 'uppercase'
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px'
         });
 
         if (rev.difficulty.toLowerCase() === 'easy') {
-          diffSpan.style.color = '#22c55e';
-          diffSpan.style.backgroundColor = 'rgba(34, 197, 94, 0.1)';
+          diffSpan.style.color = '#4ade80';
+          diffSpan.style.backgroundColor = 'rgba(74, 222, 128, 0.12)';
+          diffSpan.style.border = '1px solid rgba(74, 222, 128, 0.25)';
         } else if (rev.difficulty.toLowerCase() === 'medium') {
-          diffSpan.style.color = '#eab308';
-          diffSpan.style.backgroundColor = 'rgba(234, 179, 8, 0.1)';
+          diffSpan.style.color = '#fbbf24';
+          diffSpan.style.backgroundColor = 'rgba(251, 191, 36, 0.12)';
+          diffSpan.style.border = '1px solid rgba(251, 191, 36, 0.25)';
         } else {
-          diffSpan.style.color = '#ef4444';
-          diffSpan.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+          diffSpan.style.color = '#f87171';
+          diffSpan.style.backgroundColor = 'rgba(248, 113, 113, 0.12)';
+          diffSpan.style.border = '1px solid rgba(248, 113, 113, 0.25)';
         }
 
-        itemA.appendChild(textSpan);
+        itemA.appendChild(titleCol);
         itemA.appendChild(diffSpan);
         listContainer.appendChild(itemA);
       });
