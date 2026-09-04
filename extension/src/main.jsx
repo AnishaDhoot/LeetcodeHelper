@@ -202,90 +202,147 @@ const scrapeFailingTestcase = () => {
   return null;
 };
 
-const handleVerdictDetected = async (verdict, node) => {
-  console.log(`[DSA Tutor Content] Verdict detected: ${verdict}`);
+const FAIRPLAY_PROTECTED_SELECTORS = [
+  '[data-e2e-locator="console-result-block"]',
+  '[data-e2e-locator="console-result"]',
+  '[data-e2e-locator="submission-result"]',
+  '[data-layout-path*="console"]',
+  '[data-layout-path*="terminal"]',
+  '[data-layout-path*="editor"]',
+  '.testcase-panel',
+  '.result-container',
+  '.monaco-editor',
+  '.CodeMirror'
+];
 
-  const { problemId, problemTitle } = scrapeProblemIdentity();
+function isProtectedFromLock(node) {
+  if (!node || !(node instanceof HTMLElement)) return false;
+  return FAIRPLAY_PROTECTED_SELECTORS.some(sel => !!node.closest?.(sel));
+}
 
-  window.dsaTutor?.setLoading(true);
+let isAnalyzingSubmission = false;
+let lastSubmissionKey = null;
+let lastSubmissionTime = 0;
+const SUBMISSION_COOLDOWN_MS = 8000;
 
-  if (verdict === 'Accepted') {
-    chrome.runtime.sendMessage({
-      action: 'analyze_submission',
-      payload: {
-        problem_id: problemId,
-        problem_title: problemTitle,
-        code: '',
-        language: scrapeCurrentLanguage(),
-        verdict: 'Accepted',
-        time_taken_seconds: 0,
-        hints_used: window.dsaTutor?.hintsUsed || 0
-      }
-    }, (response) => {
-      if (response && response.success) {
-        window.dsaTutor?.setDiagnosis({
+const handleVerdictDetected = (verdict, source = 'dom') => {
+  return new Promise((resolve) => {
+    const { problemId, problemTitle } = scrapeProblemIdentity();
+    console.log(`[DSA Tutor Content] Processing submission verdict: ${verdict} for ${problemId} [source: ${source}]`);
+    window.dsaTutor?.setLoading(true);
+
+    if (verdict === 'Accepted') {
+      chrome.runtime.sendMessage({
+        action: 'analyze_submission',
+        payload: {
+          problem_id: problemId,
+          problem_title: problemTitle,
+          code: '',
+          language: scrapeCurrentLanguage(),
           verdict: 'Accepted',
-          explanation: 'Submission succeeded! Great job.',
-          suggested_action: 'Proceed to your next recommended problem.'
-        });
-        if (window.dsaTutor?.fetchActiveTest) {
-          window.dsaTutor.fetchActiveTest();
+          time_taken_seconds: 0,
+          hints_used: window.dsaTutor?.hintsUsed || 0
         }
-        if (window.dsaTutor?.fetchMastery) {
-          window.dsaTutor.fetchMastery();
+      }, (response) => {
+        try {
+          if (response && response.success) {
+            window.dsaTutor?.setDiagnosis({
+              verdict: 'Accepted',
+              explanation: 'Submission succeeded! Great job.',
+              suggested_action: 'Proceed to your next recommended problem.'
+            });
+            if (response.data?.badge_test_result && window.dsaTutor?.showBadgeAwardModal) {
+              window.dsaTutor.showBadgeAwardModal(response.data.badge_test_result);
+            }
+          } else {
+            window.dsaTutor?.setError(response?.error || 'Failed to record success submission.');
+          }
+        } finally {
+          resolve();
         }
-        if (response.data?.badge_test_result && window.dsaTutor?.showBadgeAwardModal) {
-          window.dsaTutor.showBadgeAwardModal(response.data.badge_test_result);
-        }
-      } else {
-        window.dsaTutor?.setError(response?.error || 'Failed to record success submission.');
-      }
-    });
-    return;
-  }
-
-  const code = await getCodeFromPage();
-  if (!code) {
-    window.dsaTutor?.setError('Failed to retrieve code from Monaco editor: empty code');
-    return;
-  }
-
-  const testCases = scrapeFailingTestcase();
-
-  let errorDetails = '';
-  const errEls = document.querySelectorAll('[class*="compile-error"], [class*="err-msg"]');
-  if (errEls.length > 0) {
-    errorDetails = Array.from(errEls).map(el => el.textContent?.trim()).join('\n');
-  }
-
-  chrome.runtime.sendMessage({
-    action: 'analyze_submission',
-    payload: {
-      problem_id: problemId,
-      problem_title: problemTitle,
-      code: code,
-      language: scrapeCurrentLanguage(),
-      verdict: verdict,
-      error_details: errorDetails,
-      test_cases: testCases,
-      hints_used: window.dsaTutor?.hintsUsed || 0
-    }
-  }, (response) => {
-    if (response && response.success) {
-      window.dsaTutor?.setDiagnosis({
-        verdict: verdict,
-        root_cause_category: response.data.root_cause_category,
-        explanation: response.data.explanation,
-        suggested_action: response.data.suggested_action
       });
-      if (window.dsaTutor?.fetchActiveTest) {
-        window.dsaTutor.fetchActiveTest();
-      }
-    } else {
-      window.dsaTutor?.setError(response?.error || 'Failed to diagnose submission.');
+      return;
     }
+
+    (async () => {
+      try {
+        const code = await getCodeFromPage();
+        if (!code) {
+          window.dsaTutor?.setError('Failed to retrieve code from Monaco editor: empty code');
+          resolve();
+          return;
+        }
+
+        const testCases = scrapeFailingTestcase();
+        let errorDetails = '';
+        const errEls = document.querySelectorAll('[class*="compile-error"], [class*="err-msg"]');
+        if (errEls.length > 0) {
+          errorDetails = Array.from(errEls).map(el => el.textContent?.trim()).join('\n');
+        }
+
+        chrome.runtime.sendMessage({
+          action: 'analyze_submission',
+          payload: {
+            problem_id: problemId,
+            problem_title: problemTitle,
+            code: code,
+            language: scrapeCurrentLanguage(),
+            verdict: verdict,
+            error_details: errorDetails,
+            test_cases: testCases,
+            hints_used: window.dsaTutor?.hintsUsed || 0
+          }
+        }, (response) => {
+          try {
+            if (response && response.success) {
+              window.dsaTutor?.setDiagnosis({
+                verdict: verdict,
+                root_cause_category: response.data.root_cause_category,
+                explanation: response.data.explanation,
+                suggested_action: response.data.suggested_action
+              });
+            } else {
+              window.dsaTutor?.setError(response?.error || 'Failed to diagnose submission.');
+            }
+          } finally {
+            resolve();
+          }
+        });
+      } catch (err) {
+        window.dsaTutor?.setError(err?.message || 'Unexpected diagnosis error');
+        resolve();
+      }
+    })();
   });
 };
+
+function tryHandleVerdict(verdict, source = 'dom') {
+  const { problemId } = scrapeProblemIdentity();
+  const key = `${problemId}:${verdict}`;
+  const now = Date.now();
+
+  if (isAnalyzingSubmission) {
+    console.log(`[DSA Tutor Content] Ignored duplicate ${verdict} from ${source}: analysis already in-flight.`);
+    return false;
+  }
+
+  if (key === lastSubmissionKey && (now - lastSubmissionTime) < SUBMISSION_COOLDOWN_MS) {
+    console.log(`[DSA Tutor Content] Ignored ${verdict} from ${source}: within cooldown (${now - lastSubmissionTime}ms).`);
+    return false;
+  }
+
+  isAnalyzingSubmission = true;
+  lastSubmissionKey = key;
+  lastSubmissionTime = now;
+  lastSubmitClickTimestamp = 0;
+  recentSubmitAt = 0;
+
+  handleVerdictDetected(verdict, source).finally(() => {
+    isAnalyzingSubmission = false;
+  });
+
+  return true;
+}
 
 let lastSubmitClickTimestamp = 0;
 let recentSubmitAt = 0;
@@ -349,24 +406,20 @@ window.addEventListener('popstate', checkUrlChange);
 window.addEventListener('hashchange', checkUrlChange);
 setInterval(checkUrlChange, 1000);
 
+// Channel 1: Primary Network Interception Message Listener
 window.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'LEETCODE_SUBMISSION_RESULT') {
     const verdict = event.data.verdict;
     if (verdict && isWithinSubmitGrace()) {
-      const { problemId } = scrapeProblemIdentity();
-      const subKey = `${problemId}_${verdict}`;
-      const now = Date.now();
-      const lastTime = lastDetectedSubmissions.get(subKey) || 0;
-      if (now - lastTime >= 2000) {
-        lastDetectedSubmissions.set(subKey, now);
-        handleVerdictDetected(verdict);
-      }
+      tryHandleVerdict(verdict, 'network');
     }
   }
 });
 
+// Channel 2: DOM Mutation Observer
 const checkNodeForVerdict = (node) => {
   if (!node || !(node instanceof HTMLElement)) return;
+  if (isProtectedFromLock(node)) return;
   if (processedVerdictNodes.has(node) || node.dataset?.dsaProcessed === "true") return;
 
   const text = node.textContent?.trim() || '';
@@ -375,37 +428,22 @@ const checkNodeForVerdict = (node) => {
   const verdicts = ['Accepted', 'Wrong Answer', 'Time Limit Exceeded', 'Runtime Error', 'Compile Error', 'Memory Limit Exceeded'];
   for (const v of verdicts) {
     if (text === v || (text.includes(v) && text.length < 40)) {
-      const timeSinceSubmit = Date.now() - lastSubmitClickTimestamp;
-      const isWithinGrace = isWithinSubmitGrace();
-
       const isRunSampleOnly = !!node.closest(
         '[data-e2e-locator="console-result"], [data-layout-path*="testcase"], [class*="run-code"], [class*="run-result"], [class*="testcase-result"]'
       );
-      if (isRunSampleOnly) {
-        return;
-      }
+      if (isRunSampleOnly) return;
+      if (!isWithinSubmitGrace()) return;
 
-      if (!isWithinGrace) {
+      // If network channel recently caught this submission, silently drop redundant DOM hits
+      const timeSinceLastNetworkHit = Date.now() - lastSubmissionTime;
+      if (lastSubmissionKey && timeSinceLastNetworkHit < 3000) {
         return;
       }
 
       processedVerdictNodes.add(node);
       try { node.dataset.dsaProcessed = "true"; } catch (e) { }
 
-      lastSubmitClickTimestamp = 0;
-      recentSubmitAt = 0;
-
-      const { problemId } = scrapeProblemIdentity();
-      const subKey = `${problemId}_${v}`;
-      const now = Date.now();
-      const lastTime = lastDetectedSubmissions.get(subKey) || 0;
-
-      if (now - lastTime < 3000) {
-        return;
-      }
-
-      lastDetectedSubmissions.set(subKey, now);
-      handleVerdictDetected(v, node);
+      tryHandleVerdict(v, 'dom');
       break;
     }
   }
@@ -464,6 +502,7 @@ let directAssessmentReason = '';
 
 const isForbiddenDOMElement = (el) => {
   if (!el || el === document.body) return false;
+  if (isProtectedFromLock(el)) return false;
   if (el.closest && el.closest('#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror, [data-layout-path*="editor"], [data-layout-path*="console"], [data-layout-path*="terminal"], [data-e2e-locator*="console"], [data-e2e-locator*="submission-result"], [class*="result"], [class*="verdict"], [class*="status"], [class*="testcase"]')) {
     return false;
   }

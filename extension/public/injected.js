@@ -250,8 +250,27 @@ const injectLockCSS = (isLocked) => {
   }
 };
 
+const FAIRPLAY_PROTECTED_SELECTORS = [
+  '[data-e2e-locator="console-result-block"]',
+  '[data-e2e-locator="console-result"]',
+  '[data-e2e-locator="submission-result"]',
+  '[data-layout-path*="console"]',
+  '[data-layout-path*="terminal"]',
+  '[data-layout-path*="editor"]',
+  '.testcase-panel',
+  '.result-container',
+  '.monaco-editor',
+  '.CodeMirror'
+];
+
+function isProtectedFromLock(node) {
+  if (!node || !(node instanceof HTMLElement)) return false;
+  return FAIRPLAY_PROTECTED_SELECTORS.some(sel => !!node.closest?.(sel));
+}
+
 const isForbiddenElement = (el) => {
   if (!el || el === document.body) return false;
+  if (isProtectedFromLock(el)) return false;
   if (el.closest && el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container, .monaco-editor, .CodeMirror, [data-layout-path*='editor'], [data-layout-path*='console'], [data-layout-path*='terminal'], [data-e2e-locator*='console'], [data-e2e-locator*='submission-result'], [class*='result'], [class*='verdict'], [class*='status'], [class*='testcase']")) {
     return false;
   }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 // Format category names for user-friendly display
 const CATEGORY_MAP = {
@@ -20,6 +20,18 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [diagnosis, setDiagnosis] = useState(null);
   const [error, setError] = useState(null);
+
+  const refreshTimerRef = useRef(null);
+  const scheduleBatchedRefresh = () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      fetchMastery();
+      fetchRecommendation();
+      fetchStreak();
+      fetchActiveTest();
+      fetchAiQuota();
+    }, 100);
+  };
 
   // Badge Test states
   const [activeTest, setActiveTest] = useState(null);
@@ -1028,12 +1040,8 @@ export default function App() {
         if (diagResult.verdict === 'Accepted') {
           setShowExplainBack(true);
         }
-        // Refresh mastery & recommendations as they might have changed
-        fetchMastery();
-        fetchRecommendation();
-        fetchStreak();
-        fetchActiveTest();
-        fetchAiQuota();
+        // Consolidated debounced refresh to eliminate render flashing
+        scheduleBatchedRefresh();
       },
       setError: (errMessage) => {
         setLoading(false);
@@ -1050,11 +1058,7 @@ export default function App() {
         }
       }),
       refreshData: () => {
-        fetchMastery();
-        fetchRecommendation();
-        fetchStreak();
-        fetchActiveTest();
-        fetchAiQuota();
+        scheduleBatchedRefresh();
       }
     });
 
