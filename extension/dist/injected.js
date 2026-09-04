@@ -709,23 +709,30 @@ window.addEventListener("message", (event) => {
         }
       };
 
-      executeReset();
-      const resetPollInterval = setInterval(async () => {
-        resetAttempts++;
+      const startResetFlow = async () => {
+        debugReset('Attempting instant GraphQL starter snippet reset');
+        const fetched = await fetchStarterSnippetAndApply();
+        if (fetched) {
+          debugReset('Instant GraphQL starter snippet reset applied successfully');
+          return;
+        }
+
+        debugReset('GraphQL snippet reset unavailable, attempting native reset button polling');
         executeReset();
-        if (resetAttempts > 15 || resetDone) {
-          clearInterval(resetPollInterval);
-          debugReset('Polling loop completed', { resetAttempts, resetDone });
-          if (!resetDone) {
-            debugReset('Attempting GraphQL starter snippet fallback');
-            const fetched = await fetchStarterSnippetAndApply();
-            debugReset('GraphQL starter snippet fallback outcome', { fetched });
-            if (!fetched) {
+        const resetPollInterval = setInterval(() => {
+          resetAttempts++;
+          executeReset();
+          if (resetAttempts > 10 || resetDone) {
+            clearInterval(resetPollInterval);
+            debugReset('Polling loop completed', { resetAttempts, resetDone });
+            if (!resetDone) {
               fallbackToSnapshot();
             }
           }
-        }
-      }, 300);
+        }, 250);
+      };
+
+      startResetFlow();
 
       if (window.__dsaTutorReadOnly) {
         setTimeout(() => {
