@@ -1101,11 +1101,6 @@ export default function App() {
     chrome.runtime.sendMessage({ action: 'get_recommendation', payload: { company: comp || null } }, (response) => {
       if (response && response.success) {
         setRecommendation(response.data);
-        if (response.data?.reviews && response.data.reviews.length > 0 && !autoOpenedReviews) {
-          setAutoOpenedReviews(true);
-          setActiveTab('recommendation');
-          setIsOpen(true);
-        }
       } else {
         console.error('Failed to fetch recommendation:', response?.error);
       }

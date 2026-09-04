@@ -649,6 +649,13 @@ observer.observe(document.body, { childList: true, subtree: true });
 console.log('[DSA Tutor Content] DOM observer and overlay UI initialized.');
 
 const injectSpacedRepetitionReminder = () => {
+  try {
+    const isDismissedSession = sessionStorage.getItem('dsa_tutor_spaced_reminder_dismissed') === 'true';
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isDismissedToday = localStorage.getItem('dsa_tutor_spaced_reminder_dismissed_date') === todayStr;
+    if (isDismissedSession || isDismissedToday) return;
+  } catch (e) {}
+
   chrome.runtime.sendMessage({ action: 'get_recommendation' }, (res) => {
     if (res && res.success && res.data && res.data.reviews && res.data.reviews.length > 0) {
       const dueReviews = res.data.reviews;
@@ -709,6 +716,10 @@ const injectSpacedRepetitionReminder = () => {
       closeBtn.onmouseenter = () => { closeBtn.style.color = '#f4f4f5'; };
       closeBtn.onmouseleave = () => { closeBtn.style.color = '#71717a'; };
       closeBtn.onclick = () => {
+        try {
+          sessionStorage.setItem('dsa_tutor_spaced_reminder_dismissed', 'true');
+          localStorage.setItem('dsa_tutor_spaced_reminder_dismissed_date', new Date().toISOString().split('T')[0]);
+        } catch (e) {}
         reminderDiv.remove();
       };
 

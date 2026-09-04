@@ -511,6 +511,70 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
+      const fetchStarterSnippetAndApply = async () => {
+        try {
+          const slugMatch = window.location.pathname.match(/problems\/([^/]+)/);
+          const titleSlug = slugMatch ? slugMatch[1] : '';
+          if (!titleSlug) return false;
+
+          const res = await fetch('/graphql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: `
+                query questionEditorData($titleSlug: String!) {
+                  question(titleSlug: $titleSlug) {
+                    codeSnippets {
+                      lang
+                      langSlug
+                      code
+                    }
+                  }
+                }
+              `,
+              variables: { titleSlug }
+            })
+          });
+
+          if (!res.ok) return false;
+          const json = await res.json();
+          const snippets = json?.data?.question?.codeSnippets;
+          if (!snippets || !Array.isArray(snippets) || snippets.length === 0) return false;
+
+          const bestModel = getActiveCodeModel();
+          if (!bestModel) return false;
+
+          const modelLang = (bestModel.getLanguageId ? bestModel.getLanguageId() : '').toLowerCase();
+          let match = snippets.find(s => {
+            const slug = (s.langSlug || '').toLowerCase();
+            const langName = (s.lang || '').toLowerCase();
+            return slug === modelLang || langName.includes(modelLang) || modelLang.includes(slug);
+          });
+
+          if (!match && modelLang === 'python') {
+            match = snippets.find(s => s.langSlug === 'python3' || s.langSlug === 'python');
+          }
+          if (!match && (modelLang === 'javascript' || modelLang === 'typescript')) {
+            match = snippets.find(s => s.langSlug === 'javascript' || s.langSlug === 'typescript');
+          }
+          if (!match) {
+            match = snippets[0];
+          }
+
+          if (match && match.code) {
+            console.log('[DSA Tutor Injected] Applied official starter code via GraphQL for', titleSlug, match.langSlug);
+            bestModel.setValue(match.code);
+            return true;
+          }
+        } catch (e) {
+          console.warn('[DSA Tutor Injected] Failed to fetch starter snippet from GraphQL:', e);
+        }
+        return false;
+      };
+
+      // Immediately fetch and apply the official starter template
+      fetchStarterSnippetAndApply();
+
       let resetAttempts = 0;
       let resetDone = false;
 
@@ -521,7 +585,7 @@ window.addEventListener("message", (event) => {
             const key = bestModel.uri.toString();
             const initialCode = window.__dsaTutorInitialCodeByUri?.get(key);
             if (initialCode !== undefined) {
-              console.warn('[DSA Tutor Injected] Native reset button not found — falling back to snapshot (may be stale)');
+              console.warn('[DSA Tutor Injected] Native reset button not found — falling back to snapshot');
               bestModel.setValue(initialCode);
             }
           }
