@@ -690,7 +690,60 @@ window.addEventListener("message", (event) => {
         return resetBtn;
       };
 
+      const dismissLeetcodeDialogs = () => {
+        try {
+          const dialogs = Array.from(document.querySelectorAll(
+            '[role="dialog"], [role="alertdialog"], [aria-modal="true"], div[id*="headlessui-dialog"], div[data-headlessui-state*="open"], div[class*="modal"], div[class*="dialog"], div[class*="popup"], .ant-modal, .ant-modal-wrap, .ant-modal-root'
+          ));
+
+          for (const dlg of dialogs) {
+            if (dlg.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) continue;
+            if (dlg.id && dlg.id.startsWith("dsa-tutor")) continue;
+
+            const text = (dlg.textContent || '').toLowerCase();
+            if (text.includes('reset') || text.includes('discard') || text.includes('default code') || text.includes('changes') || text.includes('revert') || text.includes('restore') || text.includes('lose')) {
+              debugReset('Found LeetCode reset/discard dialog', dlg);
+
+              const buttons = Array.from(dlg.querySelectorAll('button, div[role="button"], a[role="button"]'));
+              let actionBtn = buttons.find(b => {
+                const bTxt = (b.textContent || '').trim().toLowerCase();
+                const bCls = (b.className || '').toLowerCase();
+                const bCy = ((b.getAttribute('data-cy') || '') + ' ' + (b.getAttribute('data-cypress') || '')).toLowerCase();
+                return (
+                  bTxt === 'confirm' || bTxt === 'discard' || bTxt === 'reset' || bTxt === 'restore' || bTxt === 'yes' || bTxt === 'ok' || bTxt === 'overwrite' ||
+                  bTxt.includes('discard') || bTxt.includes('reset') || bTxt.includes('confirm') ||
+                  bCls.includes('confirm') || bCls.includes('discard') || bCls.includes('danger') || bCls.includes('brand-orange') || bCls.includes('primary') ||
+                  bCy.includes('confirm') || bCy.includes('discard')
+                );
+              });
+
+              if (!actionBtn) {
+                actionBtn = buttons.find(b => {
+                  const bTxt = (b.textContent || '').trim().toLowerCase();
+                  return bTxt !== 'cancel' && bTxt !== 'close' && bTxt !== 'no' && !bTxt.includes('cancel') && !bTxt.includes('close');
+                });
+              }
+
+              if (actionBtn) {
+                debugReset('Auto-clicking dialog action button', actionBtn);
+                triggerClick(actionBtn);
+              }
+
+              setTimeout(() => {
+                try {
+                  dlg.style.setProperty("display", "none", "important");
+                  dlg.style.setProperty("visibility", "hidden", "important");
+                  dlg.style.setProperty("opacity", "0", "important");
+                  dlg.style.setProperty("pointer-events", "none", "important");
+                } catch (e) { }
+              }, 60);
+            }
+          }
+        } catch (e) { }
+      };
+
       const tryConfirmModal = () => {
+        dismissLeetcodeDialogs();
         const confirmBtns = Array.from(document.querySelectorAll(
           'button, div[role="button"], [data-cy*="confirm" i], [data-cy*="discard" i], [data-cypress*="confirm" i], [data-cypress*="discard" i], [data-e2e-locator*="confirm" i], [data-e2e-locator*="discard" i], [class*="modal"] button, [class*="dialog"] button, [class*="popup"] button, [class*="confirm"], [class*="discard"], [class*="danger"], [role="dialog"] button, button.ant-btn-primary, button.ant-btn-dangerous'
         ));
@@ -722,8 +775,11 @@ window.addEventListener("message", (event) => {
           debugReset('Triggering click on native reset button', resetBtn);
           resetTriggerClicked = true;
           triggerClick(resetBtn);
-          [40, 100, 200, 350, 600, 1000, 1500, 2500].forEach(delay => {
-            setTimeout(tryConfirmModal, delay);
+          [20, 60, 120, 250, 450, 750, 1200, 2000].forEach(delay => {
+            setTimeout(() => {
+              tryConfirmModal();
+              dismissLeetcodeDialogs();
+            }, delay);
           });
         }
       };
@@ -733,6 +789,7 @@ window.addEventListener("message", (event) => {
         const fetched = await fetchStarterSnippetAndApply();
         if (fetched) {
           debugReset('Instant GraphQL starter snippet reset applied successfully');
+          [20, 60, 150, 300, 600, 1000].forEach(delay => setTimeout(dismissLeetcodeDialogs, delay));
           return;
         }
 
@@ -741,6 +798,7 @@ window.addEventListener("message", (event) => {
         const resetPollInterval = setInterval(() => {
           resetAttempts++;
           executeReset();
+          dismissLeetcodeDialogs();
           if (resetAttempts > 10 || resetDone) {
             clearInterval(resetPollInterval);
             debugReset('Polling loop completed', { resetAttempts, resetDone });
