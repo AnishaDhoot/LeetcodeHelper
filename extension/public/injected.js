@@ -522,15 +522,26 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
+      const getCsrfToken = () => {
+        const match = document.cookie.match(/csrftoken=([^;]+)/);
+        return match ? match[1] : '';
+      };
+
       const fetchStarterSnippetAndApply = async () => {
         try {
           const slugMatch = window.location.pathname.match(/problems\/([^/]+)/);
           const titleSlug = slugMatch ? slugMatch[1] : '';
           if (!titleSlug) return false;
 
+          const csrfToken = getCsrfToken();
+          const headers = { 'Content-Type': 'application/json' };
+          if (csrfToken) {
+            headers['x-csrftoken'] = csrfToken;
+          }
+
           const res = await fetch('/graphql', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify({
               query: `
                 query questionEditorData($titleSlug: String!) {
@@ -585,6 +596,7 @@ window.addEventListener("message", (event) => {
 
       let resetAttempts = 0;
       let resetDone = false;
+      let resetTriggerClicked = false;
 
       const fallbackToSnapshot = () => {
         try {
@@ -631,7 +643,7 @@ window.addEventListener("message", (event) => {
             (el.innerHTML || '')
           ).toLowerCase();
 
-          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('retrieve') || str.includes('rotate') || str.includes('undo');
+          return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('retrieve') || str.includes('arrow-rotate-left') || str.includes('rotate-left');
         });
 
         if (!resetBtn) {
@@ -641,7 +653,7 @@ window.addEventListener("message", (event) => {
             for (const b of btns) {
               if (b.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) continue;
               const html = (b.outerHTML || '').toLowerCase();
-              if (html.includes('reset') || html.includes('rotate') || html.includes('history') || html.includes('undo') || html.includes('default') || html.includes('refresh') || html.includes('arrow-rotate-left') || html.includes('rotate-left')) {
+              if (html.includes('reset') || html.includes('default code') || html.includes('arrow-rotate-left') || html.includes('rotate-left')) {
                 resetBtn = b.closest('button, [role="button"]') || b;
                 break;
               }
@@ -672,9 +684,10 @@ window.addEventListener("message", (event) => {
       };
 
       const executeReset = () => {
-        if (resetDone) return;
+        if (resetDone || resetTriggerClicked) return;
         const resetBtn = findResetButton();
         if (resetBtn) {
+          resetTriggerClicked = true;
           triggerClick(resetBtn);
           [40, 100, 200, 350, 600, 1000, 1500, 2500].forEach(delay => {
             setTimeout(tryConfirmModal, delay);
