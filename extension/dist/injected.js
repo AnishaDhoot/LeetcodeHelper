@@ -594,6 +594,10 @@ window.addEventListener("message", (event) => {
         return false;
       };
 
+      const debugReset = (msg, data) => {
+        console.log(`[DSA Tutor DEBUG] ${msg}`, data !== undefined ? data : '');
+      };
+
       let resetAttempts = 0;
       let resetDone = false;
       let resetTriggerClicked = false;
@@ -605,6 +609,7 @@ window.addEventListener("message", (event) => {
             const key = bestModel.uri.toString();
             const initialCode = window.__dsaTutorInitialCodeByUri?.get(key);
             if (initialCode !== undefined) {
+              debugReset('Snapshot fallback applied', { uri: key, length: initialCode.length });
               console.warn('[DSA Tutor Injected] Native reset button not found — falling back to snapshot');
               bestModel.setValue(initialCode);
             }
@@ -630,6 +635,8 @@ window.addEventListener("message", (event) => {
           'button, [role="button"], [data-cypress*="Reset" i], [data-cy*="reset" i], [data-e2e-locator*="reset" i], [data-track-name*="reset" i], [data-track-load*="reset" i], [aria-label*="Reset" i], [aria-label*="default code" i], [aria-label*="Retrieve" i], [title*="Reset" i], [title*="default code" i], [title*="Retrieve" i]'
         ));
 
+        debugReset('candidate buttons found', allButtons.length);
+
         let resetBtn = allButtons.find(el => {
           if (el.closest("#dsa-tutor-panel-root, #dsa-tutor-root, #dsa-tutor-react-container, #dsa-tutor-panel-container")) return false;
           const str = (
@@ -646,8 +653,11 @@ window.addEventListener("message", (event) => {
           return str.includes('reset') || str.includes('restore') || str.includes('revert') || str.includes('default code') || str.includes('retrieve') || str.includes('arrow-rotate-left') || str.includes('rotate-left');
         });
 
+        debugReset('resetBtn from primary search', resetBtn);
+
         if (!resetBtn) {
           const editorToolbars = document.querySelectorAll('[class*="editor"] [class*="tools"], [class*="editor-header"], .monaco-editor, [class*="action-btn"], [class*="toolbar"], [class*="editor-actions"]');
+          debugReset('toolbar candidates', editorToolbars.length);
           for (const bar of editorToolbars) {
             const btns = bar.querySelectorAll('button, svg, [role="button"]');
             for (const b of btns) {
@@ -661,6 +671,8 @@ window.addEventListener("message", (event) => {
             if (resetBtn) break;
           }
         }
+
+        debugReset('final resetBtn', resetBtn);
         return resetBtn;
       };
 
@@ -676,6 +688,7 @@ window.addEventListener("message", (event) => {
           return txt === 'confirm' || txt === 'reset' || txt === 'restore' || txt === 'yes' || txt.includes('reset code') || txt.includes('confirm') || cls.includes('confirm') || cls.includes('danger') || cls.includes('brand-orange') || cy.includes('confirm');
         });
         if (confirmBtn) {
+          debugReset('tryConfirmModal found confirm button', confirmBtn);
           triggerClick(confirmBtn);
           resetDone = true;
           return true;
@@ -687,6 +700,7 @@ window.addEventListener("message", (event) => {
         if (resetDone || resetTriggerClicked) return;
         const resetBtn = findResetButton();
         if (resetBtn) {
+          debugReset('Triggering click on native reset button', resetBtn);
           resetTriggerClicked = true;
           triggerClick(resetBtn);
           [40, 100, 200, 350, 600, 1000, 1500, 2500].forEach(delay => {
@@ -701,8 +715,11 @@ window.addEventListener("message", (event) => {
         executeReset();
         if (resetAttempts > 15 || resetDone) {
           clearInterval(resetPollInterval);
+          debugReset('Polling loop completed', { resetAttempts, resetDone });
           if (!resetDone) {
+            debugReset('Attempting GraphQL starter snippet fallback');
             const fetched = await fetchStarterSnippetAndApply();
+            debugReset('GraphQL starter snippet fallback outcome', { fetched });
             if (!fetched) {
               fallbackToSnapshot();
             }
