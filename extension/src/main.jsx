@@ -410,9 +410,12 @@ setInterval(checkUrlChange, 1000);
 window.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'LEETCODE_SUBMISSION_RESULT') {
     const verdict = event.data.verdict;
-    if (verdict && isWithinSubmitGrace()) {
+    if (verdict) {
       tryHandleVerdict(verdict, 'network');
     }
+  }
+  if (event.data && event.data.type === 'LEETCODE_SUBMIT_INITIATED') {
+    markSubmitIntent(); // still gates the DOM-observer channel below
   }
 });
 

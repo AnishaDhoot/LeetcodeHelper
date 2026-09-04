@@ -1,21 +1,38 @@
 (function () {
+  window.__dsaTutorLastActionWasSubmit = false;
+
+  const classifyAndTrack = (url) => {
+    const u = (typeof url === 'string' ? url : url?.url || '').toLowerCase();
+    if (u.includes('/interpret_solution/') || u.includes('/interpret/')) {
+      window.__dsaTutorLastActionWasSubmit = false;
+    } else if (/\/problems\/[^/]+\/submit\/?$/.test(u) || u.includes('/submit/') || u.includes('/submissions/')) {
+      window.__dsaTutorLastActionWasSubmit = true;
+      window.postMessage({ type: 'LEETCODE_SUBMIT_INITIATED' }, '*');
+    }
+  };
+
+  const postVerdictIfSubmit = (statusMsg) => {
+    if (!statusMsg || !window.__dsaTutorLastActionWasSubmit) return;
+    window.postMessage({
+      type: 'LEETCODE_SUBMISSION_RESULT',
+      verdict: statusMsg === 'Accepted' ? 'Accepted' : statusMsg
+    }, '*');
+  };
+
   const origFetch = window.fetch;
   if (origFetch) {
     window.fetch = async function (...args) {
+      const url = (typeof args[0] === 'string' ? args[0] : args[0]?.url || '');
+      classifyAndTrack(url);
       const response = await origFetch.apply(this, args);
       try {
-        const url = (typeof args[0] === 'string' ? args[0] : args[0]?.url || '').toLowerCase();
-        if (url.includes('/submissions/') || url.includes('/check/') || url.includes('/graphql')) {
+        const lower = url.toLowerCase();
+        if (lower.includes('/submissions/') || lower.includes('/check/') || lower.includes('/graphql')) {
           const clone = response.clone();
           clone.json().then(data => {
             if (!data) return;
             const statusMsg = data.status_msg || data.data?.submissionDetail?.statusDisplay || data.data?.submissionStatus?.statusDisplay;
-            if (statusMsg) {
-              window.postMessage({
-                type: 'LEETCODE_SUBMISSION_RESULT',
-                verdict: statusMsg === 'Accepted' ? 'Accepted' : statusMsg
-              }, '*');
-            }
+            postVerdictIfSubmit(statusMsg);
           }).catch(() => { });
         }
       } catch (e) { }
@@ -29,6 +46,7 @@
     const origSend = origXHR.prototype.send;
     origXHR.prototype.open = function (method, url) {
       this._url = url;
+      classifyAndTrack(url);
       return origOpen.apply(this, arguments);
     };
     origXHR.prototype.send = function () {
@@ -38,12 +56,7 @@
           if (url.includes('/submissions/') || url.includes('/check/') || url.includes('/graphql')) {
             const data = JSON.parse(this.responseText);
             const statusMsg = data?.status_msg || data?.data?.submissionDetail?.statusDisplay || data?.data?.submissionStatus?.statusDisplay;
-            if (statusMsg) {
-              window.postMessage({
-                type: 'LEETCODE_SUBMISSION_RESULT',
-                verdict: statusMsg === 'Accepted' ? 'Accepted' : statusMsg
-              }, '*');
-            }
+            postVerdictIfSubmit(statusMsg);
           }
         } catch (e) { }
       });
@@ -498,33 +511,24 @@ window.addEventListener("message", (event) => {
 
   if (event.data && event.data.type === "RESET_EDITOR") {
     try {
-      let directResetDone = false;
-      try {
-        const bestModel = getActiveCodeModel();
-        console.log('[DSA Tutor Injected] RESET_EDITOR chose model:', bestModel ? bestModel.uri.toString() : null);
-        console.log('[DSA Tutor Injected] snapshot map keys:', Array.from(window.__dsaTutorInitialCodeByUri?.keys() || []));
-        if (bestModel) {
-          const key = bestModel.uri.toString();
-          const initialCode = window.__dsaTutorInitialCodeByUri?.get(key);
-          console.log('[DSA Tutor Injected] snapshot found for chosen model:', initialCode !== undefined, initialCode !== undefined ? initialCode.length : null);
-          if (initialCode !== undefined) {
-            bestModel.setValue(initialCode);
-            directResetDone = true;
-          }
-        }
-      } catch (e) {
-        console.warn('[DSA Tutor Injected] Direct model reset failed, falling back to UI click:', e);
-      }
-
-      if (directResetDone) {
-        if (window.__dsaTutorReadOnly) {
-          setTimeout(() => applyReadOnlyState(true), 100);
-        }
-        return;
-      }
-
       let resetAttempts = 0;
       let resetDone = false;
+
+      const fallbackToSnapshot = () => {
+        try {
+          const bestModel = getActiveCodeModel();
+          if (bestModel) {
+            const key = bestModel.uri.toString();
+            const initialCode = window.__dsaTutorInitialCodeByUri?.get(key);
+            if (initialCode !== undefined) {
+              console.warn('[DSA Tutor Injected] Native reset button not found — falling back to snapshot (may be stale)');
+              bestModel.setValue(initialCode);
+            }
+          }
+        } catch (e) {
+          console.warn('[DSA Tutor Injected] Snapshot fallback failed:', e);
+        }
+      };
 
       const triggerClick = (el) => {
         if (!el) return;
@@ -612,6 +616,7 @@ window.addEventListener("message", (event) => {
         executeReset();
         if (resetAttempts > 15 || resetDone) {
           clearInterval(resetPollInterval);
+          if (!resetDone) fallbackToSnapshot();
         }
       }, 300);
 

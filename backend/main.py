@@ -249,6 +249,14 @@ def _seed_elo_rating(solved_count: int) -> float:
     mastery_fraction = min(1.0, math.log(solved_count + 1) / math.log(51))
     return 800.0 + 1200.0 * mastery_fraction
 
+def normalize_problem_id(pid: Optional[str]) -> str:
+    """Normalizes problem identifiers and slugs into consistent lower-case hyphenated format."""
+    if not pid:
+        return ""
+    s = str(pid).strip().rstrip("/").split("/")[-1]
+    return s.strip().lower().replace("_", "-").replace(" ", "-")
+
+
 app = FastAPI(title="Autonomous DSA Tutor Agent Backend")
 
 ALLOWED_ORIGINS = [
@@ -405,16 +413,10 @@ def analyze_submission(req: SubmissionAnalyzeRequest, db: Session = Depends(get_
     # Check badge test progress before modifying TopicMastery rating
     active_test = db.query(BadgeTest).filter(BadgeTest.status == "active").first()
     
-    def normalize_problem_slug(s: Optional[str]) -> str:
-        if not s:
-            return ""
-        s = s.rstrip("/").split("/")[-1]
-        return s.strip().lower().replace("_", "-").replace(" ", "-")
-
-    p_id_norm = normalize_problem_slug(problem.id)
-    p_req_norm = normalize_problem_slug(req.problem_id)
-    p1_id_norm = normalize_problem_slug(active_test.problem1_id) if active_test else ""
-    p2_id_norm = normalize_problem_slug(active_test.problem2_id) if active_test else ""
+    p_id_norm = normalize_problem_id(problem.id)
+    p_req_norm = normalize_problem_id(req.problem_id)
+    p1_id_norm = normalize_problem_id(active_test.problem1_id) if active_test else ""
+    p2_id_norm = normalize_problem_id(active_test.problem2_id) if active_test else ""
 
     is_p1_match = (p_id_norm == p1_id_norm or p_req_norm == p1_id_norm or (problem.title and active_test and problem.title.lower() == (db.query(Problem).filter(Problem.id == active_test.problem1_id).first().title.lower() if db.query(Problem).filter(Problem.id == active_test.problem1_id).first() else "")))
     is_p2_match = (p_id_norm == p2_id_norm or p_req_norm == p2_id_norm or (problem.title and active_test and problem.title.lower() == (db.query(Problem).filter(Problem.id == active_test.problem2_id).first().title.lower() if db.query(Problem).filter(Problem.id == active_test.problem2_id).first() else "")))
@@ -775,8 +777,8 @@ def start_badge_test(req: BadgeTestStartRequest, db: Session = Depends(get_db)):
     test = BadgeTest(
         topic=req.topic,
         level=target_level,
-        problem1_id=selected[0].id,
-        problem2_id=selected[1].id,
+        problem1_id=normalize_problem_id(selected[0].id),
+        problem2_id=normalize_problem_id(selected[1].id),
         problem1_solved=False,
         problem2_solved=False,
         time_limit_seconds=5400,
@@ -822,18 +824,20 @@ def get_active_badge_test(db: Session = Depends(get_db)):
         db.commit()
         return None
 
-    p1 = db.query(Problem).filter(Problem.id == test.problem1_id).first()
-    p2 = db.query(Problem).filter(Problem.id == test.problem2_id).first()
+    p1_norm = normalize_problem_id(test.problem1_id)
+    p2_norm = normalize_problem_id(test.problem2_id)
+    p1 = db.query(Problem).filter((Problem.id == test.problem1_id) | (Problem.id == p1_norm)).first()
+    p2 = db.query(Problem).filter((Problem.id == test.problem2_id) | (Problem.id == p2_norm)).first()
 
     # Sync solved status only from Accepted attempts made during this active test session
     grace_start = (test.start_time - timedelta(seconds=120)) if test.start_time else now
     p1_accepted = db.query(Attempt).filter(
-        (Attempt.problem_id.ilike(test.problem1_id) | Attempt.problem_id.ilike(f"%{test.problem1_id}%")),
+        (Attempt.problem_id.ilike(test.problem1_id) | Attempt.problem_id.ilike(p1_norm) | Attempt.problem_id.ilike(f"%{p1_norm}%")),
         Attempt.verdict.in_(["Accepted", "accepted", "success", "Success"]),
         Attempt.timestamp >= grace_start
     ).first()
     p2_accepted = db.query(Attempt).filter(
-        (Attempt.problem_id.ilike(test.problem2_id) | Attempt.problem_id.ilike(f"%{test.problem2_id}%")),
+        (Attempt.problem_id.ilike(test.problem2_id) | Attempt.problem_id.ilike(p2_norm) | Attempt.problem_id.ilike(f"%{p2_norm}%")),
         Attempt.verdict.in_(["Accepted", "accepted", "success", "Success"]),
         Attempt.timestamp >= grace_start
     ).first()
@@ -931,8 +935,8 @@ def reset_badge_test_questions(db: Session = Depends(get_db)):
     if len(selected) < 2:
         raise HTTPException(status_code=500, detail="Not enough candidate problems to reset test.")
 
-    test.problem1_id = selected[0].id
-    test.problem2_id = selected[1].id
+    test.problem1_id = normalize_problem_id(selected[0].id)
+    test.problem2_id = normalize_problem_id(selected[1].id)
     test.problem1_solved = False
     test.problem2_solved = False
     test.start_time = get_utc_now()

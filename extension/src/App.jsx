@@ -1039,6 +1039,9 @@ export default function App() {
         setCoachLoading(null);
         if (diagResult.verdict === 'Accepted') {
           setShowExplainBack(true);
+          if (activeTest) {
+            fetchActiveTest();
+          }
         }
         // Consolidated debounced refresh to eliminate render flashing
         scheduleBatchedRefresh();
