@@ -482,8 +482,11 @@ const injectDirectLockCSS = (isLocked) => {
         [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        div[class*="past-submissions"], div[class*="submissions-list"], div[class*="submission-list"], div[class*="submission-detail"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"], section[class*="submissions"] {
+        div[class*="past-submissions"], div[class*="submissions-list"], div[class*="submission-list"],
+        div[class*="submission-detail"]:not([data-e2e-locator="submission-result"]):not(.testcase-panel):not(.result-container),
+        section[class*="discussion"], section[class*="comment"], section[class*="community"],
+        section[class*="submission"]:not([data-e2e-locator="submission-result"]),
+        section[class*="submissions"]:not([data-e2e-locator="submission-result"]) {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;

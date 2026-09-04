@@ -3,9 +3,13 @@
 
   const classifyAndTrack = (url) => {
     const u = (typeof url === 'string' ? url : url?.url || '').toLowerCase();
+
+    // Poll/check requests are not a new action — ignore them for classification
+    if (u.includes('/check/')) return;
+
     if (u.includes('/interpret_solution/') || u.includes('/interpret/')) {
       window.__dsaTutorLastActionWasSubmit = false;
-    } else if (/\/problems\/[^/]+\/submit\/?$/.test(u) || u.includes('/submit/') || u.includes('/submissions/')) {
+    } else if (/\/problems\/[^/]+\/submit\/?$/.test(u)) {
       window.__dsaTutorLastActionWasSubmit = true;
       window.postMessage({ type: 'LEETCODE_SUBMIT_INITIATED' }, '*');
     }
@@ -238,13 +242,15 @@ const injectLockCSS = (isLocked) => {
       styleEl.id = "dsa-tutor-fairplay-css";
       styleEl.textContent = `
         a[href*="/solution"], a[href*="/solutions"], a[href*="/editorial"], a[href*="/editorials"], a[href*="/discussion"], a[href*="/discussions"], a[href*="/comments"], a[href*="/community"], a[href*="/submissions"], a[href*="/submission"],
-        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"], div[data-layout-path*="submission"], div[data-layout-path*="submissions"],
-        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"], [data-track-load*="submission"], [data-track-load*="submissions"],
-        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"], [data-key*="submission"], [data-key*="submissions"],
+        div[data-layout-path*="solution"], div[data-layout-path*="solutions"], div[data-layout-path*="editorial"], div[data-layout-path*="editorials"], div[data-layout-path*="discussion"], div[data-layout-path*="discussions"], div[data-layout-path*="community"],
+        [data-track-load*="discussion"], [data-track-load*="discussions"], [data-track-load*="solution"], [data-track-load*="solutions"], [data-track-load*="editorial"], [data-track-load*="editorials"],
+        [data-key*="solution"], [data-key*="solutions"], [data-key*="editorial"], [data-key*="editorials"], [data-key*="discussion"], [data-key*="discussions"],
         div[class*="hint-"], details[class*="hint"], div[class*="Hint"],
         div[class*="discussion-"], div[class*="discussions-"], div[class*="comment-"], div[class*="comments-"],
-        div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"], div[class*="submission-detail"],
-        section[class*="discussion"], section[class*="comment"], section[class*="community"], section[class*="submission"], section[class*="submissions"] {
+        div[class*="submissions-list"], div[class*="submission-list"], div[class*="past-submissions"],
+        div[class*="submission-detail"]:not([data-e2e-locator="submission-result"]):not(.testcase-panel):not(.result-container),
+        section[class*="discussion"], section[class*="comment"], section[class*="community"],
+        section[class*="submission"]:not([data-e2e-locator="submission-result"]) {
           display: none !important;
           visibility: hidden !important;
           pointer-events: none !important;
@@ -577,9 +583,6 @@ window.addEventListener("message", (event) => {
         return false;
       };
 
-      // Immediately fetch and apply the official starter template
-      fetchStarterSnippetAndApply();
-
       let resetAttempts = 0;
       let resetDone = false;
 
@@ -680,12 +683,17 @@ window.addEventListener("message", (event) => {
       };
 
       executeReset();
-      const resetPollInterval = setInterval(() => {
+      const resetPollInterval = setInterval(async () => {
         resetAttempts++;
         executeReset();
         if (resetAttempts > 15 || resetDone) {
           clearInterval(resetPollInterval);
-          if (!resetDone) fallbackToSnapshot();
+          if (!resetDone) {
+            const fetched = await fetchStarterSnippetAndApply();
+            if (!fetched) {
+              fallbackToSnapshot();
+            }
+          }
         }
       }, 300);
 
